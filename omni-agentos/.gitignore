@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+.env
+.env.local
+.env.*
+!.env.example
+!.env.*.example
+
+# Logs
+*.log
+
+# Build files
+dist/
+build/
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# ChromaDB
+backend/data/chroma/
+
+# Uploads
+backend/uploads/
+
+# Cache
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
