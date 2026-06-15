@@ -7,5 +7,5 @@ export interface ApprovalRequest {
   description: string
   riskLevel: RiskLevel
   taskId: string
-  status: 'pending' | 'approved' | 'rejected' | 'timeout'
+  status: 'pending' | 'approved' | 'rejected' | 'timeout' | 'completed'
 }

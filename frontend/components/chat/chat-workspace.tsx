@@ -209,6 +209,22 @@ export function ChatWorkspace(): JSX.Element {
       const payload = getToolResultPayload(event)
       if (!payload) return
 
+      if (payload.tool === 'write_file_tool' || payload.tool === 'run_command_tool') {
+        const { pendingApprovals, completeApproval } = useApprovalStore.getState()
+        const matchingApproval = [...pendingApprovals]
+          .reverse()
+          .find(
+            (approval) =>
+              approval.status === 'approved' &&
+              approval.tool === payload.tool &&
+              approval.taskId === getEventTaskId(event)
+          )
+
+        if (matchingApproval) {
+          completeApproval(matchingApproval.approvalId)
+        }
+      }
+
       addEvent({
         label: '[Tool]',
         message: `${payload.tool} -> ${payload.result.slice(0, 80)}`,

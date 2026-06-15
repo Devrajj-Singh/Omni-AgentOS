@@ -120,6 +120,11 @@ export function ApprovalBubble({ approval }: ApprovalBubbleProps): JSX.Element {
             Reject
           </button>
         </div>
+      ) : approval.status === 'completed' ? (
+        <div className="flex items-center gap-2 text-sm font-medium text-status-green">
+          <CheckCircle className="h-4 w-4" />
+          Completed
+        </div>
       ) : (
         <div className={`flex items-center gap-2 text-sm font-medium ${approval.status === 'approved' ? 'text-status-green' : 'text-status-red'}`}>
           {approval.status === 'approved' ? (

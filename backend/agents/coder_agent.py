@@ -47,10 +47,6 @@ SYSTEM_PROMPT = """You are Omni AgentOS - an intelligent AI coding and research 
 ## Available Tools
 - search_documents: Search uploaded research documents. Use this ONLY for uploaded documents, PDFs, summaries, or analysis requests. Do not use it for creating, reading, editing, or writing workspace files.
 - web_search_tool: Search the web for current information. Use ONLY when the user explicitly asks to search online or find recent information.
-- read_file_tool: Read a file from the workspace filesystem.
-- write_file_tool: Write or create a file in the workspace.
-- list_directory_tool: List files in a workspace directory.
-- run_command_tool: Run a terminal command in the workspace.
 
 ## Strict Rules - Follow These Exactly
 1. NEVER call the same tool more than 2 times per conversation turn.
@@ -59,13 +55,23 @@ SYSTEM_PROMPT = """You are Omni AgentOS - an intelligent AI coding and research 
 4. If web_search_tool returns results, summarize them and STOP - do not call it again.
 5. Once you have enough information to answer, stop using tools and respond.
 6. If asked to summarize an uploaded file, use search_documents with the filename or topic as the query.
-7. If asked to create, write, edit, read, or inspect a workspace file, use the filesystem tools, not search_documents.
 
 ## Response Style
 - Be concise and direct
 - Cite source URLs when using web search results
 - For code, always use proper markdown code blocks
 - Think step by step but keep responses focused"""
+
+WORKSPACE_TOOLS_PROMPT = """
+
+## Workspace Tools (available - a workspace folder is open)
+- read_file_tool: Read a file from the workspace filesystem.
+- write_file_tool: Write or create a file in the workspace.
+- list_directory_tool: List files in a workspace directory.
+- run_command_tool: Run a terminal command in the workspace.
+
+## Additional Rule
+7. If asked to create, write, edit, read, or inspect a workspace file, use the filesystem tools, not search_documents."""
 
 
 def _query_terms(query: str) -> set[str]:
@@ -408,7 +414,11 @@ async def run_agent(
         context_parts.append(f"Currently open file: {active_file_path}")
     context_str = "\n".join(context_parts)
 
-    lc_messages = [SystemMessage(content=SYSTEM_PROMPT)]
+    effective_system_prompt = SYSTEM_PROMPT
+    if workspace_root:
+        effective_system_prompt += WORKSPACE_TOOLS_PROMPT
+
+    lc_messages = [SystemMessage(content=effective_system_prompt)]
     if context_str:
         lc_messages.append(SystemMessage(content=f"Context:\n{context_str}"))
     if memory_context:
@@ -511,6 +521,16 @@ async def run_agent(
 
     except asyncio.TimeoutError:
         await on_thinking("Agent timed out after tool execution; returning the completed tool result.")
+    except Exception as exc:
+        error_text = str(exc)
+        if "tool call validation failed" in error_text and "was not in request.tools" in error_text:
+            full_response = (
+                "I can't modify files or run commands until a workspace folder is opened. "
+                "Please open a folder in Developer mode first."
+            )
+            await on_token(full_response)
+            return full_response
+        raise
 
     if not full_response and last_tool_result:
         full_response = f"Done. {last_tool_result}"
