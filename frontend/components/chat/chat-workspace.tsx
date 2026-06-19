@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { FolderOpen } from 'lucide-react'
+import { agentStyle } from '@/lib/agent-styles'
 import { sendChatMessage } from '@/services/api'
 import { wsService } from '@/services/websocket'
 import { useActivityStore } from '@/store/activity-store'
@@ -39,6 +40,12 @@ interface ToolResultPayload {
 
 interface ThinkingPayload {
   reasoning: string
+}
+
+interface AgentHandoffPayload {
+  fromAgent: string | null
+  toAgent: string
+  reason: string
 }
 
 interface ApprovalRequiredPayload {
@@ -100,6 +107,20 @@ function getToolResultPayload(event: WSEvent): ToolResultPayload | null {
 
 function getThinkingPayload(event: WSEvent): ThinkingPayload | null {
   return hasStringProperty(event.payload, 'reasoning') ? { reasoning: event.payload.reasoning } : null
+}
+
+function getAgentHandoffPayload(event: WSEvent): AgentHandoffPayload | null {
+  if (!hasStringProperty(event.payload, 'toAgent') || !hasStringProperty(event.payload, 'reason')) {
+    return null
+  }
+  const fromAgent =
+    typeof event.payload === 'object' &&
+    event.payload !== null &&
+    'fromAgent' in event.payload &&
+    typeof event.payload.fromAgent === 'string'
+      ? event.payload.fromAgent
+      : null
+  return { fromAgent, toAgent: event.payload.toAgent, reason: event.payload.reason }
 }
 
 function getEventTaskId(event: WSEvent): string {
@@ -243,6 +264,18 @@ export function ChatWorkspace(): JSX.Element {
       })
     })
 
+    const unsubAgentHandoff = wsService.on('agent.handoff', (event) => {
+      const payload = getAgentHandoffPayload(event)
+      if (!payload) return
+
+      const style = agentStyle(payload.toAgent)
+      addEvent({
+        label: `[${style.label}]`,
+        message: payload.reason,
+        status: 'running',
+      })
+    })
+
     const unsubApprovalRequired = wsService.on('approval.required', (event) => {
       const payload = getApprovalRequiredPayload(event)
       if (!payload) return
@@ -283,6 +316,7 @@ export function ChatWorkspace(): JSX.Element {
       unsubToolCall()
       unsubToolResult()
       unsubThinking()
+      unsubAgentHandoff()
       unsubApprovalRequired()
       unsubApprovalResolved()
     }

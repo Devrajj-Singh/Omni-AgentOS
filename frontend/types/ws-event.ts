@@ -2,6 +2,7 @@ export type WSEventType =
   | 'token'
   | 'agent.thinking'
   | 'agent.done'
+  | 'agent.handoff'
   | 'tool.call'
   | 'tool.result'
   | 'approval.required'

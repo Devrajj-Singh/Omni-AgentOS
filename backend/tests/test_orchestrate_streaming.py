@@ -21,9 +21,9 @@ async def test_orchestrate_streaming_happy_path():
     )
     conversation_history = []
     
-    # Mock the manager, run_agent, and memory store
+    # Mock the manager, run_orchestrated, and memory store
     with patch('routers.chat.manager') as mock_manager, \
-         patch('routers.chat.run_agent') as mock_run_agent, \
+         patch('routers.chat.run_orchestrated') as mock_run_orchestrated, \
          patch('routers.chat.memory_store') as mock_memory_store, \
          patch('routers.chat.session_store') as mock_session_store:
         
@@ -40,7 +40,7 @@ async def test_orchestrate_streaming_happy_path():
             await kwargs["on_token"]("!")
             return "Hello there!"
 
-        mock_run_agent.side_effect = mock_agent
+        mock_run_orchestrated.side_effect = mock_agent
         
         # Execute orchestration
         await orchestrate_streaming(
@@ -110,9 +110,9 @@ async def test_orchestrate_streaming_error_handling():
     )
     conversation_history = []
     
-    # Mock the manager and run_agent to raise an error
+    # Mock the manager and run_orchestrated to raise an error
     with patch('routers.chat.manager') as mock_manager, \
-         patch('routers.chat.run_agent') as mock_run_agent, \
+         patch('routers.chat.run_orchestrated') as mock_run_orchestrated, \
          patch('routers.chat.memory_store') as mock_memory_store, \
          patch('routers.chat.session_store') as mock_session_store:
         
@@ -120,7 +120,7 @@ async def test_orchestrate_streaming_error_handling():
         mock_manager.send_event = AsyncMock()
         mock_session_store.get_history.return_value = []
         mock_memory_store.get_relevant_context.return_value = ""
-        mock_run_agent.side_effect = Exception("API Error")
+        mock_run_orchestrated.side_effect = Exception("API Error")
         
         # Execute orchestration
         await orchestrate_streaming(
@@ -172,9 +172,9 @@ async def test_orchestrate_streaming_with_conversation_history():
         )
     ]
     
-    # Mock the manager and run_agent
+    # Mock the manager and run_orchestrated
     with patch('routers.chat.manager') as mock_manager, \
-         patch('routers.chat.run_agent') as mock_run_agent, \
+         patch('routers.chat.run_orchestrated') as mock_run_orchestrated, \
          patch('routers.chat.memory_store') as mock_memory_store, \
          patch('routers.chat.session_store') as mock_session_store:
         
@@ -190,7 +190,7 @@ async def test_orchestrate_streaming_with_conversation_history():
             await kwargs["on_token"]("Response")
             return "Response"
 
-        mock_run_agent.side_effect = mock_agent
+        mock_run_orchestrated.side_effect = mock_agent
         
         # Execute orchestration
         await orchestrate_streaming(
@@ -203,10 +203,11 @@ async def test_orchestrate_streaming_with_conversation_history():
             autonomous_mode=False,
         )
         
-        mock_run_agent.assert_called_once()
-        assert mock_run_agent.call_args.kwargs["autonomous_mode"] is False
-        assert "on_approval_required" in mock_run_agent.call_args.kwargs
-        assert mock_run_agent.call_args.kwargs["conversation_history"] == [
+        mock_run_orchestrated.assert_called_once()
+        assert mock_run_orchestrated.call_args.kwargs["autonomous_mode"] is False
+        assert "on_approval_required" in mock_run_orchestrated.call_args.kwargs
+        assert "on_handoff" in mock_run_orchestrated.call_args.kwargs
+        assert mock_run_orchestrated.call_args.kwargs["conversation_history"] == [
             {"role": "user", "content": "First message"},
             {"role": "assistant", "content": "First response"},
         ]
@@ -225,7 +226,7 @@ async def test_orchestrate_streaming_emits_approval_required():
     )
 
     with patch('routers.chat.manager') as mock_manager, \
-         patch('routers.chat.run_agent') as mock_run_agent, \
+         patch('routers.chat.run_orchestrated') as mock_run_orchestrated, \
          patch('routers.chat.memory_store') as mock_memory_store, \
          patch('routers.chat.session_store') as mock_session_store:
 
@@ -244,7 +245,7 @@ async def test_orchestrate_streaming_emits_approval_required():
             )
             return "Done."
 
-        mock_run_agent.side_effect = mock_agent
+        mock_run_orchestrated.side_effect = mock_agent
 
         await orchestrate_streaming(
             session_id=session_id,
@@ -268,4 +269,55 @@ async def test_orchestrate_streaming_emits_approval_required():
             "args": {"path": "test.py"},
             "description": "Write 12 characters to `test.py`",
             "riskLevel": "medium",
+        }
+
+
+@pytest.mark.asyncio
+async def test_orchestrate_streaming_emits_agent_handoff():
+    """Test handoff callback emits agent.handoff events."""
+    session_id = "test-session-123"
+    task_id = "test-task-456"
+    user_message = Message(
+        id="user-msg-1",
+        role="user",
+        content="Build a health check endpoint",
+        is_streaming=False
+    )
+
+    with patch('routers.chat.manager') as mock_manager, \
+         patch('routers.chat.run_orchestrated') as mock_run_orchestrated, \
+         patch('routers.chat.memory_store') as mock_memory_store, \
+         patch('routers.chat.session_store') as mock_session_store:
+
+        mock_manager.send_event = AsyncMock()
+        mock_session_store.append_messages = MagicMock()
+        mock_memory_store.get_relevant_context.return_value = ""
+        mock_memory_store.save_turn = MagicMock()
+
+        async def mock_orchestrated(**kwargs):
+            await kwargs["on_handoff"](None, "planner", "Multi-step request detected - planning")
+            return "Done."
+
+        mock_run_orchestrated.side_effect = mock_orchestrated
+
+        await orchestrate_streaming(
+            session_id=session_id,
+            task_id=task_id,
+            user_message=user_message,
+            conversation_history=[],
+            workspace_path="C:/workspace",
+            active_file_path=None,
+            autonomous_mode=False,
+        )
+
+        handoff_events = [
+            call_args[0][1]
+            for call_args in mock_manager.send_event.call_args_list
+            if call_args[0][1].type == WSEventType.AGENT_HANDOFF
+        ]
+        assert len(handoff_events) == 1
+        assert handoff_events[0].payload == {
+            "fromAgent": None,
+            "toAgent": "planner",
+            "reason": "Multi-step request detected - planning",
         }

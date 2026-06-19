@@ -12,6 +12,7 @@ class WSEventType(str, Enum):
     TOKEN = "token"
     AGENT_THINKING = "agent.thinking"
     AGENT_DONE = "agent.done"
+    AGENT_HANDOFF = "agent.handoff"
     TOOL_CALL = "tool.call"
     TOOL_RESULT = "tool.result"
     APPROVAL_REQUIRED = "approval.required"

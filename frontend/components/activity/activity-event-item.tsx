@@ -1,6 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
+import { agentStyle } from '@/lib/agent-styles'
 import type { ActivityEvent } from '@/types'
 
 export interface ActivityEventItemProps {
@@ -14,6 +15,12 @@ function formatTimestamp(timestamp: string): string {
     minute: '2-digit',
     second: '2-digit',
   })
+}
+
+function labelClassName(label: string): string {
+  const agentName = label.match(/^\[(Planner|Researcher|Coder|Reviewer)\]$/)?.[1]
+  if (!agentName) return 'text-accent'
+  return agentStyle(agentName.toLowerCase()).color
 }
 
 export function ActivityEventItem({ event }: ActivityEventItemProps): JSX.Element {
@@ -31,7 +38,7 @@ export function ActivityEventItem({ event }: ActivityEventItemProps): JSX.Elemen
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <span className="text-[11px] font-semibold text-accent">{event.label}</span>
+          <span className={`text-[11px] font-semibold ${labelClassName(event.label)}`}>{event.label}</span>
           <span className="text-[10px] text-text-muted">{formatTimestamp(event.timestamp)}</span>
         </div>
         <p className="mt-0.5 truncate text-xs text-text-muted">{event.message}</p>
