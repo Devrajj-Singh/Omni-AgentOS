@@ -4,7 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks
 
-from agents.coder_agent import run_agent
+from agents.orchestrator import run_orchestrated
 from dependencies.session_store import session_store
 from memory.store import memory_store
 from models.chat import ChatRequest, ChatResponse
@@ -116,18 +116,35 @@ async def orchestrate_streaming(
                 )
             )
 
-        full_response = await run_agent(
+        async def on_handoff(from_agent: str | None, to_agent: str, reason: str) -> None:
+            await manager.send_event(
+                session_id,
+                WSEvent(
+                    type=WSEventType.AGENT_HANDOFF,
+                    task_id=task_id,
+                    payload={
+                        "fromAgent": from_agent,
+                        "toAgent": to_agent,
+                        "reason": reason,
+                    },
+                    timestamp=datetime.utcnow()
+                )
+            )
+
+        full_response = await run_orchestrated(
             message=user_message.content,
             conversation_history=history_dicts,
             workspace_root=workspace_path,
             active_file_path=active_file_path,
             memory_context=memory_context,
             autonomous_mode=autonomous_mode,
+            task_id=task_id,
             on_token=on_token,
             on_tool_call=on_tool_call,
             on_tool_result=on_tool_result,
             on_thinking=on_thinking,
             on_approval_required=on_approval_required,
+            on_handoff=on_handoff,
         )
 
         assistant_message = Message(

@@ -1,7 +1,7 @@
 'use client'
 
 import { motion } from 'framer-motion'
-import { Zap, Brain, CheckCircle, Wrench, PackageCheck, Play, Flag, AlertCircle, ShieldCheck, type LucideIcon } from 'lucide-react'
+import { Zap, Brain, CheckCircle, Wrench, PackageCheck, Play, Flag, AlertCircle, ShieldCheck, Shuffle, type LucideIcon } from 'lucide-react'
 import type { WSEvent, WSEventType } from '@/types'
 
 export interface EventEntryProps {
@@ -12,6 +12,7 @@ const eventIconMap: Record<WSEventType, LucideIcon> = {
   token: Zap,
   'agent.thinking': Brain,
   'agent.done': CheckCircle,
+  'agent.handoff': Shuffle,
   'tool.call': Wrench,
   'tool.result': PackageCheck,
   'approval.required': ShieldCheck,
@@ -25,6 +26,7 @@ const eventLabelMap: Record<WSEventType, string> = {
   token: 'Token',
   'agent.thinking': 'Thinking',
   'agent.done': 'Done',
+  'agent.handoff': 'Agent Handoff',
   'tool.call': 'Tool Call',
   'tool.result': 'Tool Result',
   'approval.required': 'Approval Required',

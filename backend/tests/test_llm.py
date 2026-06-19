@@ -6,6 +6,7 @@ import pytest
 import os
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
+from configs.settings import app_settings
 from services.llm import stream_chat, GeminiError, _convert_messages
 
 
@@ -90,7 +91,7 @@ class TestStreamChat:
 
             mock_client.chat.completions.create.assert_called_once()
             _, kwargs = mock_client.chat.completions.create.call_args
-            assert kwargs["model"] == "llama-3.1-8b-instant"
+            assert kwargs["model"] == app_settings.active_model
         
         assert len(tokens) == 2
         assert tokens[0] == "Hello"
