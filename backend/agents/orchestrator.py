@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 
@@ -87,6 +88,30 @@ def _research_available() -> bool:
     return bool(TAVILY_API_KEY and TAVILY_AVAILABLE)
 
 
+async def _logged_tool_call(
+    task_id: str,
+    on_tool_call: Callable[[str, dict[str, Any]], Awaitable[None]],
+    tool_name: str,
+    args: dict[str, Any],
+) -> None:
+    log_event("tool_call", task_id, agent="coder", tool=tool_name)
+    await on_tool_call(tool_name, args)
+
+
+async def _logged_tool_result(
+    task_id: str,
+    on_tool_result: Callable[[str, str], Awaitable[None]],
+    tool_name: str,
+    result: str,
+    duration_ms: float | None = None,
+) -> None:
+    fields: dict[str, Any] = {"tool": tool_name, "result_length": len(result)}
+    if duration_ms is not None:
+        fields["duration_ms"] = duration_ms
+    log_event("tool_result", task_id, agent="coder", **fields)
+    await on_tool_result(tool_name, result)
+
+
 async def run_orchestrated(
     message: str,
     conversation_history: list[dict[str, Any]],
@@ -103,6 +128,28 @@ async def run_orchestrated(
     on_handoff: Callable[[str | None, str, str], Awaitable[None]],
 ) -> str:
     """Route simple requests to Coder or complex requests through the graph."""
+    token_char_count = 0
+    tool_start_times: dict[str, float] = {}
+
+    async def counting_on_token(text: str) -> None:
+        nonlocal token_char_count
+        token_char_count += len(text)
+        await on_token(text)
+
+    async def wrapped_on_tool_call(tool_name: str, args: dict[str, Any]) -> None:
+        tool_start_times[tool_name] = time.perf_counter()
+        await _logged_tool_call(task_id, on_tool_call, tool_name, args)
+
+    async def wrapped_on_tool_result(tool_name: str, result: str) -> None:
+        started_at = tool_start_times.pop(tool_name, None)
+        duration_ms = None
+        if started_at is not None:
+            duration_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        await _logged_tool_result(task_id, on_tool_result, tool_name, result, duration_ms)
+
+    def finish_response(response: str) -> str:
+        log_event("task_summary", task_id, agent=None, response_char_count=token_char_count)
+        return response
 
     async def emit_handoff(from_agent: str | None, to_agent: str, reason: str) -> None:
         log_event(
@@ -118,19 +165,20 @@ async def run_orchestrated(
     if not _is_multi_agent_task(message):
         log_event("routing_decision", task_id, agent=None, route="direct_coder")
         await emit_handoff(None, "coder", "Single-step request routed directly")
-        return await run_coder_agent(
+        response = await run_coder_agent(
             message=message,
             conversation_history=conversation_history,
             workspace_root=workspace_root,
             active_file_path=active_file_path,
             memory_context=memory_context,
             autonomous_mode=autonomous_mode,
-            on_token=on_token,
-            on_tool_call=on_tool_call,
-            on_tool_result=on_tool_result,
+            on_token=counting_on_token,
+            on_tool_call=wrapped_on_tool_call,
+            on_tool_result=wrapped_on_tool_result,
             on_thinking=on_thinking,
             on_approval_required=on_approval_required,
         )
+        return finish_response(response)
 
     log_event("routing_decision", task_id, agent=None, route="multi_agent")
 
@@ -150,9 +198,9 @@ async def run_orchestrated(
         await emit_handoff("planner", "researcher", "Plan requires research")
         await on_thinking("Researching...")
         with timed_span("agent_run", task_id, "researcher"):
-            await on_tool_call("web_search_tool", {"query": state["task"]})
+            await wrapped_on_tool_call("web_search_tool", {"query": state["task"]})
             research_findings = web_search(state["task"])
-            await on_tool_result("web_search_tool", research_findings[:500])
+            await wrapped_on_tool_result("web_search_tool", research_findings[:500])
         log_event(
             "research_complete",
             task_id,
@@ -180,9 +228,9 @@ async def run_orchestrated(
                 active_file_path=state["active_file_path"],
                 memory_context=coder_context,
                 autonomous_mode=state["autonomous_mode"],
-                on_token=on_token,
-                on_tool_call=on_tool_call,
-                on_tool_result=on_tool_result,
+                on_token=counting_on_token,
+                on_tool_call=wrapped_on_tool_call,
+                on_tool_result=wrapped_on_tool_result,
                 on_thinking=on_thinking,
                 on_approval_required=on_approval_required,
             )
@@ -241,4 +289,4 @@ async def run_orchestrated(
         "task_id": task_id,
     }
     final_state = await graph.compile().ainvoke(initial_state)
-    return final_state.get("final_response") or final_state.get("coder_output") or ""
+    return finish_response(final_state.get("final_response") or final_state.get("coder_output") or "")

@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from tools.websearch import TAVILY_AVAILABLE
 
-from routers import approval, chat, health, memory, research, session, settings_router, websocket, workspace
+from routers import approval, chat, health, memory, observability, research, session, settings_router, websocket, workspace
 
 # Configure logging
 logging.basicConfig(
@@ -81,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(approval.router, prefix="/api/v1", tags=["approval"])
     app.include_router(chat.router, tags=["chat"])
     app.include_router(memory.router, prefix="/api/v1", tags=["memory"])
+    app.include_router(observability.router, prefix="/api/v1", tags=["observability"])
     app.include_router(research.router, prefix="/api/v1", tags=["research"])
     app.include_router(settings_router.router, prefix="/api/v1", tags=["settings"])
     app.include_router(websocket.router, tags=["websocket"])
