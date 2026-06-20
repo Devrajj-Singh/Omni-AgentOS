@@ -1,7 +1,7 @@
 'use client'
 
 import { AnimatePresence, motion } from 'framer-motion'
-import { Brain, ChevronLeft, ChevronRight, Code2, LayoutDashboard, Search, Settings, Sparkles, User } from 'lucide-react'
+import { Activity, Brain, ChevronLeft, ChevronRight, Code2, LayoutDashboard, Search, Settings, Sparkles, User } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useUIStore } from '@/store/ui-store'
@@ -11,6 +11,7 @@ const navItems = [
   { label: 'Developer', href: '/developer', icon: Code2 },
   { label: 'Research', href: '/research', icon: Search },
   { label: 'Memory', href: '/memory', icon: Brain },
+  { label: 'Observability', href: '/observability', icon: Activity },
   { label: 'Settings', href: '/settings', icon: Settings },
 ]
 

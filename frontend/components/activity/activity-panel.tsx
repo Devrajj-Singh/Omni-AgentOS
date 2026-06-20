@@ -26,7 +26,7 @@ export function ActivityPanel(): JSX.Element {
       animate={activityPanelOpen ? 'open' : 'closed'}
       className="flex h-full flex-col bg-bg-surface"
     >
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border-default px-4">
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-border-default px-4">
         <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Activity</span>
         <div className="flex items-center gap-1.5">
           <div className={wsConnected ? 'dot-live' : 'dot-offline'} />

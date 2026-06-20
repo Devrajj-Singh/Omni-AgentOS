@@ -32,7 +32,7 @@ export function ResearchWorkspace(): JSX.Element {
 
   return (
     <div className="flex h-full flex-col bg-bg-base">
-      <div className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-default px-4 py-2 sm:h-12 sm:px-6 sm:py-0">
+      <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-default px-4 py-2 sm:h-14 sm:px-6 sm:py-0">
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-accent" />
           <h1 className="text-sm font-semibold text-text-primary">Research</h1>

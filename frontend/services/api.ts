@@ -7,6 +7,8 @@ import type {
   DocumentItem,
   DocumentListResponse,
   AppSettings,
+  EventsResponse,
+  TaskListResponse,
   WorkspaceResponse,
 } from '@/types'
 
@@ -305,4 +307,22 @@ export async function exportMemories(): Promise<object> {
   const res = await fetch(`${BASE_URL}/api/v1/settings/memory/export`)
   if (!res.ok) throw new Error(`Failed to export memories: ${res.status}`)
   return res.json() as Promise<object>
+}
+
+export async function listObservabilityTasks(): Promise<TaskListResponse> {
+  const res = await fetch(`${BASE_URL}/api/v1/observability/tasks`)
+  if (!res.ok) throw new Error(`Failed to list tasks: ${res.status}`)
+  return res.json() as Promise<TaskListResponse>
+}
+
+export async function getTaskEvents(taskId: string): Promise<EventsResponse> {
+  const res = await fetch(`${BASE_URL}/api/v1/observability/tasks/${taskId}`)
+  if (!res.ok) throw new Error(`Failed to get task events: ${res.status}`)
+  return res.json() as Promise<EventsResponse>
+}
+
+export async function listRecentEvents(limit = 200): Promise<EventsResponse> {
+  const res = await fetch(`${BASE_URL}/api/v1/observability/events?limit=${limit}`)
+  if (!res.ok) throw new Error(`Failed to list events: ${res.status}`)
+  return res.json() as Promise<EventsResponse>
 }
