@@ -1,5 +1,7 @@
 # Omni AgentOS
 
+![CI](https://github.com/Devrajj-Singh/Omni-AgentOS/actions/workflows/ci.yml/badge.svg)
+
 > Agentic AI Workspace Platform featuring RAG, Memory, Research, Developer Tools, and Autonomous Workflows.
 
 ![Architecture](docs/architecture/system-architecture.png)
