@@ -79,7 +79,7 @@ export function DeveloperWorkspace(): JSX.Element {
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-950">
       {/* Workspace header */}
-      <div className="h-10 shrink-0 items-center border-b border-slate-800 px-3 text-xs font-medium uppercase tracking-wider text-slate-400 flex">
+      <div className="flex h-14 shrink-0 items-center border-b border-slate-800 px-4 text-xs font-medium uppercase tracking-wider text-slate-400">
         <div className="min-w-0 flex-1 truncate">
           {workspace.rootName}
           <span className="ml-3 font-normal normal-case tracking-normal text-slate-500">
@@ -103,7 +103,7 @@ export function DeveloperWorkspace(): JSX.Element {
           className="min-h-0 shrink-0 border-r border-slate-800 bg-slate-900"
           style={{ width: explorerPanelWidth }}
         >
-          <div className="h-10 flex items-center px-3 border-b border-slate-800 text-xs font-medium text-slate-400 uppercase tracking-wider">
+          <div className="flex h-12 items-center border-b border-slate-800 px-4 text-xs font-medium uppercase tracking-wider text-slate-400">
             <span className="flex-1">Explorer</span>
             <button
               type="button"
@@ -117,7 +117,7 @@ export function DeveloperWorkspace(): JSX.Element {
             </button>
           </div>
 
-          <div className="h-[calc(100%-2.5rem)] min-h-0">
+          <div className="h-[calc(100%-3rem)] min-h-0">
             <FileTree
               tree={workspace.tree}
               activePath={activeFilePath}
