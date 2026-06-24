@@ -18,7 +18,7 @@ from langgraph.prebuilt import create_react_agent
 from configs.settings import app_settings
 from execution.approval_store import ApprovalDecision, approval_store
 from memory.store import memory_store
-from tools.filesystem import list_directory, read_file, write_file
+from tools.filesystem import list_directory, read_file, scan_repository, write_file
 from tools.terminal import run_command
 from tools.websearch import TAVILY_API_KEY, TAVILY_AVAILABLE, web_search
 
@@ -69,9 +69,17 @@ WORKSPACE_TOOLS_PROMPT = """
 - write_file_tool: Write or create a file in the workspace.
 - list_directory_tool: List files in a workspace directory.
 - run_command_tool: Run a terminal command in the workspace.
+- scan_repository_tool: Get the full file structure of the workspace without
+  reading contents. Use this FIRST for architecture questions, cross-file bug
+  hunting, or documentation generation.
+- read_multiple_files_tool: Read several specific files in one call (comma-
+  separated paths). Use this after scanning, to read only the files relevant
+  to the question - do not read every file in the repository.
 
 ## Additional Rule
-7. If asked to create, write, edit, read, or inspect a workspace file, use the filesystem tools, not search_documents."""
+7. If asked to create, write, edit, read, or inspect a workspace file, use the filesystem tools, not search_documents.
+8. For architecture explanations, cross-file analysis, or documentation generation: call scan_repository_tool first to see the structure, THEN use read_multiple_files_tool to read only the specific files relevant to the question (e.g. entry points, config files, the files the user mentioned). Do not attempt to read every file in a large repository - pick the ones that matter for the question asked.
+9. When suggesting refactors or finding bugs, be specific: cite the exact file and what's wrong, don't give generic advice."""
 
 
 def _query_terms(query: str) -> set[str]:
@@ -86,11 +94,21 @@ def _query_terms(query: str) -> set[str]:
     return {term for term in normalized.split() if len(term) > 2}
 
 
-def _is_document_query(message: str) -> bool:
+def _is_document_query(message: str, workspace_root: str | None = None) -> bool:
     terms = _query_terms(message)
     if terms & WORKSPACE_ACTION_TERMS and not terms & EXPLICIT_DOCUMENT_TERMS:
         return False
-    return bool(terms & DOCUMENT_QUERY_TERMS)
+
+    is_doc_match = bool(terms & DOCUMENT_QUERY_TERMS)
+
+    if is_doc_match and workspace_root:
+        # In workspace mode, generic words like "doc" or "documentation"
+        # usually mean project output, not uploaded research documents.
+        strong_upload_terms = {"upload", "uploaded", "pdf", "spreadsheet", "powerpoint"}
+        if not (terms & strong_upload_terms):
+            return False
+
+    return is_doc_match
 
 
 def _search_uploaded_documents(query: str, limit: int = 8) -> str:
@@ -128,6 +146,23 @@ def _search_uploaded_documents(query: str, limit: int = 8) -> str:
 
                 if content and (should_return_recent or has_term_match):
                     doc_parts.append(f"[Source: {filename}]\n{content}")
+                if len(doc_parts) >= limit:
+                    break
+
+        if not doc_parts:
+            # Third pass: code files may have no semantic overlap with a
+            # generic document query, so return any uploaded document chunks.
+            for mem in memory_store.get_all(limit=1000):
+                meta = mem.get("metadata", {})
+                session_id = meta.get("session_id", "")
+                if not session_id.startswith("doc:"):
+                    continue
+
+                content = meta.get("assistant_message", "")
+                if content:
+                    doc_parts.append(
+                        f"[Source: {meta.get('workspace_path', 'Unknown file')}]\n{content}"
+                    )
                 if len(doc_parts) >= limit:
                     break
 
@@ -249,6 +284,55 @@ def _build_tools(
         return list_directory(path, workspace_root)
 
     @tool
+    def scan_repository_tool() -> str:
+        """Scan the entire workspace and return its file structure (paths and
+        sizes), without reading file contents. Use this FIRST when asked to
+        explain architecture, find bugs across the codebase, or generate
+        documentation - it gives you the map before you read specific files."""
+        if not _can_call("scan_repository_tool"):
+            return "Tool call limit reached for scan_repository_tool. Use the structure you already have."
+        return scan_repository(workspace_root)
+
+    @tool
+    def read_multiple_files_tool(paths: str) -> str:
+        """Read multiple files at once. Provide paths as a comma-separated
+        list relative to the workspace root, e.g. 'src/main.py,src/utils.py'.
+        Use this after scan_repository_tool to read the specific files
+        relevant to the user's question, instead of calling read_file_tool
+        repeatedly. Limited to 8 files per call, and to a total combined size
+        budget - if you need more, ask a narrower question or request fewer
+        files at once."""
+        if not _can_call("read_multiple_files_tool"):
+            return "Tool call limit reached for read_multiple_files_tool. Use the file contents you already have."
+        file_paths = [p.strip() for p in paths.split(",") if p.strip()][:8]
+        if not file_paths:
+            return "No valid file paths provided."
+
+        MAX_COMBINED_CHARS = 4000
+        parts = []
+        total_chars = 0
+        truncated_files = []
+
+        for path in file_paths:
+            content = read_file(path, workspace_root)
+            remaining_budget = MAX_COMBINED_CHARS - total_chars
+            if remaining_budget <= 200:
+                truncated_files.append(path)
+                continue
+            if len(content) > remaining_budget:
+                content = content[:remaining_budget] + "\n[...truncated to stay within size limits...]"
+            parts.append(f"=== {path} ===\n{content}")
+            total_chars += len(content)
+
+        result = "\n\n".join(parts)
+        if truncated_files:
+            result += (
+                f"\n\n[Skipped or truncated due to size limits: {', '.join(truncated_files)}. "
+                "Ask about these individually if needed.]"
+            )
+        return result
+
+    @tool
     def run_command_tool(command: str) -> str:
         """Run a terminal command in the workspace directory. Use for git, npm, pip, etc."""
         if not _can_call("run_command_tool"):
@@ -289,7 +373,10 @@ def _build_tools(
 
     tools = [search_documents] if allow_document_search else []
     if workspace_root:
-        tools.extend([read_file_tool, write_file_tool, list_directory_tool, run_command_tool])
+        tools.extend([
+            read_file_tool, write_file_tool, list_directory_tool, run_command_tool,
+            scan_repository_tool, read_multiple_files_tool,
+        ])
     if TAVILY_API_KEY and TAVILY_AVAILABLE:
         tools.append(web_search_tool)
 
@@ -403,7 +490,7 @@ async def run_agent(
         autonomous_mode,
         on_approval_required,
         approval_loop,
-        allow_document_search=_is_document_query(message),
+        allow_document_search=_is_document_query(message, workspace_root),
     )
     agent = create_react_agent(llm, tools)
 
@@ -431,7 +518,7 @@ async def run_agent(
     last_tool_result = ""
     await on_thinking("Preparing response with workspace context." if workspace_root else "Preparing response.")
 
-    if _is_document_query(message):
+    if _is_document_query(message, workspace_root):
         await on_tool_call("search_documents", {"query": message})
         document_context = _search_uploaded_documents(message, limit=8)
         await on_tool_result("search_documents", document_context[:500])

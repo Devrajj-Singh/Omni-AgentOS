@@ -129,7 +129,7 @@ export async function searchMemories(
   }
 }
 
-export async function listMemories(limit = 20, offset = 0): Promise<MemoryListResponse> {
+export async function listMemories(limit = 100, offset = 0): Promise<MemoryListResponse> {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   const res = await fetch(`${BASE_URL}/api/v1/memory?${params.toString()}`)
 
