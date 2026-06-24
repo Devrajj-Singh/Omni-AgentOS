@@ -20,7 +20,8 @@ export async function sendChatMessage(
   conversationHistory: Message[],
   workspacePath?: string | null,
   activeFilePath?: string | null,
-  autonomousMode?: boolean
+  autonomousMode?: boolean,
+  recentlyOpenedFiles?: string[]
 ): Promise<{ task_id: string; status: string }> {
   const res = await fetch(`${BASE_URL}/api/v1/chat`, {
     method: 'POST',
@@ -38,6 +39,7 @@ export async function sendChatMessage(
       workspace_path: workspacePath ?? null,
       active_file_path: activeFilePath ?? null,
       autonomous_mode: autonomousMode ?? false,
+      recently_opened_files: recentlyOpenedFiles ?? [],
     }),
   })
 

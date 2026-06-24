@@ -610,10 +610,14 @@ async def run_agent(
         await on_thinking("Agent timed out after tool execution; returning the completed tool result.")
     except Exception as exc:
         error_text = str(exc)
-        if "tool call validation failed" in error_text and "was not in request.tools" in error_text:
+        if (
+            ("tool call validation failed" in error_text and "was not in request.tools" in error_text)
+            or "failed_generation" in error_text
+        ):
             full_response = (
-                "I can't modify files or run commands until a workspace folder is opened. "
-                "Please open a folder in Developer mode first."
+                "I wasn't able to process that request. "
+                "If you're asking about a workspace or files, please open a folder "
+                "in Developer mode first. Otherwise, try rephrasing your question."
             )
             await on_token(full_response)
             return full_response

@@ -5,11 +5,13 @@ from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks
 
 from agents.orchestrator import run_orchestrated
+from context.workspace_context import build_project_context
 from dependencies.session_store import session_store
 from memory.store import memory_store
 from models.chat import ChatRequest, ChatResponse
 from models.message import Message
 from models.ws_event import WSEvent, WSEventType
+from observability.logger import log_event
 from websocket.manager import manager
 
 router = APIRouter()
@@ -23,6 +25,7 @@ async def orchestrate_streaming(
     workspace_path: str | None,
     active_file_path: str | None,
     autonomous_mode: bool,
+    recently_opened_files: list[str] | None = None,
 ) -> None:
     """Run the LangGraph agent and stream all events over WebSocket."""
     message_id = str(uuid.uuid4())
@@ -48,6 +51,20 @@ async def orchestrate_streaming(
             query=user_message.content,
             n_results=3,
         )
+        project_context = build_project_context(
+            workspace_root=workspace_path,
+            active_file_path=active_file_path,
+            recently_opened_files=recently_opened_files,
+        )
+
+        if project_context:
+            log_event(
+                "project_context_built",
+                task_id,
+                agent=None,
+                workspace=workspace_path,
+                has_deps=bool(project_context),
+            )
 
         async def on_token(text: str) -> None:
             await manager.send_event(
@@ -137,6 +154,7 @@ async def orchestrate_streaming(
             workspace_root=workspace_path,
             active_file_path=active_file_path,
             memory_context=memory_context,
+            project_context=project_context,
             autonomous_mode=autonomous_mode,
             task_id=task_id,
             on_token=on_token,
@@ -222,6 +240,7 @@ async def chat(
         workspace_path=request.workspace_path,
         active_file_path=request.active_file_path,
         autonomous_mode=request.autonomous_mode,
+        recently_opened_files=request.recently_opened_files,
     )
     
     # Return 202 immediately
