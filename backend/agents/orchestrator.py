@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
@@ -18,9 +19,17 @@ from tools.websearch import TAVILY_API_KEY, TAVILY_AVAILABLE, web_search
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 PLANNER_PROMPT = """You are the Planner agent in a multi-agent system. Break the
-user's request into 2-5 concrete steps. Each step should be assignable to either
-the Researcher (web/document lookup) or the Coder (file operations, code,
-terminal commands). Respond with ONLY a numbered list of steps, nothing else."""
+user's request into 2-5 concrete steps for the Coder agent to execute.
+
+Rules:
+- Each step must be a direct action: write code, create a file, run a command,
+  edit a file. NOT "research" or "look up" steps.
+- Only include a research step if the user EXPLICITLY asked to search for
+  something online, or if the technology/library is genuinely obscure and
+  unlikely to be in the model's training data.
+- For common frameworks (FastAPI, React, Python, Node, etc.), skip research -
+  the Coder already knows them.
+- Respond with ONLY a numbered list of steps, nothing else."""
 
 REVIEWER_PROMPT = """You are the Reviewer agent in a multi-agent system. You will
 be shown the original task and the Coder/Researcher's output. Check it is
@@ -44,6 +53,29 @@ MULTI_AGENT_SIGNAL_TERMS = {
     "set up",
 }
 
+FILE_REFERENCE_PATTERN = re.compile(r"\b[\w\-/]+\.\w{1,5}\b")
+
+STRONG_MULTI_AGENT_TERMS = {
+    "build",
+    "scaffold",
+    "set up",
+    "develop",
+    "architect",
+    "design",
+    "multi-step",
+    "end-to-end",
+}
+
+EXPLICIT_RESEARCH_TERMS = {
+    "search online",
+    "search the web",
+    "look up online",
+    "find online",
+    "find documentation for",
+    "research the",
+    "look up the latest",
+}
+
 
 class OrchestratorState(TypedDict):
     task: str
@@ -61,9 +93,20 @@ class OrchestratorState(TypedDict):
 
 
 def _is_multi_agent_task(message: str) -> bool:
-    """Lightweight classifier - intentionally not an LLM call."""
+    """Lightweight classifier - NOT an LLM call.
+
+    Mirrors the pattern used by _is_document_query in coder_agent.py for
+    predictability and speed.
+    """
     lowered = message.lower()
     word_count = len(message.split())
+
+    references_specific_file = bool(FILE_REFERENCE_PATTERN.search(message))
+    has_strong_signal = any(term in lowered for term in STRONG_MULTI_AGENT_TERMS)
+
+    if references_specific_file and not has_strong_signal:
+        return False
+
     has_signal_term = any(term in lowered for term in MULTI_AGENT_SIGNAL_TERMS)
     return has_signal_term and word_count >= 6
 
@@ -80,8 +123,8 @@ def _get_llm() -> ChatGroq:
 def _needs_research(plan: list[str] | None) -> bool:
     if not plan:
         return False
-    research_terms = ("research", "search", "look up", "find documentation", "find out")
-    return any(any(term in step.lower() for term in research_terms) for step in plan)
+    plan_text = " ".join(plan).lower()
+    return any(term in plan_text for term in EXPLICIT_RESEARCH_TERMS)
 
 
 def _research_available() -> bool:
@@ -215,10 +258,17 @@ async def run_orchestrated(
         await on_thinking("Implementing...")
 
         coder_context = state["memory_context"]
-        if state.get("research_findings"):
-            coder_context = f"{coder_context}\n\nResearch findings:\n{state['research_findings']}".strip()
-        plan_str = "\n".join(state.get("plan") or [])
-        coder_message = f"{state['task']}\n\nPlan to follow:\n{plan_str}".strip()
+        research = state.get("research_findings") or ""
+        if research:
+            research_trimmed = research[:1500]
+            coder_context = f"{coder_context}\n\nResearch findings:\n{research_trimmed}".strip()
+
+        plan_steps = state.get("plan") or []
+        plan_str = "\n".join(plan_steps[:5])
+        if len(plan_str) > 800:
+            plan_str = plan_str[:800] + "\n[plan truncated]"
+
+        coder_message = f"{state['task']}\n\nPlan:\n{plan_str}".strip()
 
         with timed_span("agent_run", task_id, "coder"):
             coder_output = await run_coder_agent(

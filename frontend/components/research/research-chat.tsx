@@ -8,7 +8,6 @@ import { sendChatMessage } from '@/services/api'
 import { wsService } from '@/services/websocket'
 import { useActivityStore } from '@/store/activity-store'
 import { useChatStore } from '@/store/chat-store'
-import { useDeveloperStore } from '@/store/developer-store'
 import type { Message, WSEvent } from '@/types'
 
 interface ResearchChatProps {
@@ -150,8 +149,6 @@ export function ResearchChat({ documentCount }: ResearchChatProps): JSX.Element 
   const isStreaming = useChatStore((state) => state.isStreaming)
   const sessionId = useChatStore((state) => state.sessionId)
   const addEvent = useActivityStore((state) => state.addEvent)
-  const workspacePath = useDeveloperStore((state) => state.workspace.rootPath)
-  const activeFilePath = useDeveloperStore((state) => state.activeFilePath)
   const assistantMessageIdRef = useRef<string | null>(null)
   const [draft, setDraft] = useState('')
 
@@ -248,8 +245,8 @@ export function ResearchChat({ documentCount }: ResearchChatProps): JSX.Element 
           sessionId,
           content,
           conversationHistory,
-          workspacePath,
-          activeFilePath
+          null,
+          null
         )
         useChatStore.getState().setCurrentTaskId(task_id)
       } catch (error) {
@@ -260,7 +257,7 @@ export function ResearchChat({ documentCount }: ResearchChatProps): JSX.Element 
         addEvent({ label: '[Error]', message, status: 'error' })
       }
     },
-    [activeFilePath, addEvent, sessionId, workspacePath]
+    [addEvent, sessionId]
   )
 
   return (

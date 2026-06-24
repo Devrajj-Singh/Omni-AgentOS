@@ -1,10 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect } from 'react'
 import { Brain, RefreshCw } from 'lucide-react'
-import { deleteMemory, getMemoryStats, listMemories, searchMemories } from '@/services/api'
+import { deleteMemory, listMemories, searchMemories } from '@/services/api'
+import { wsService } from '@/services/websocket'
 import { useMemoryStore } from '@/store/memory-store'
-import type { MemoryItem } from '@/types'
+import type { MemoryItem, WSEventType } from '@/types'
 import { MemoryCard } from './memory-card'
 import { MemoryEmptyState } from './memory-empty-state'
 import { MemorySearchBar } from './memory-search-bar'
@@ -37,16 +38,16 @@ export function MemoryWorkspace(): JSX.Element {
     setError,
     clearSearch,
   } = useMemoryStore()
-  const [statsCount, setStatsCount] = useState(0)
 
   const loadMemories = useCallback(async () => {
     setLoading(true)
     setError(null)
-
     try {
-      const [listResponse, stats] = await Promise.all([listMemories(), getMemoryStats()])
-      setMemories(listResponse.memories, listResponse.total)
-      setStatsCount(stats.totalMemories)
+      const listResponse = await listMemories()
+      const sorted = [...listResponse.memories]
+        .filter((m) => !m.sessionId.startsWith('doc:'))
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      setMemories(sorted, listResponse.total)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load memories.')
     } finally {
@@ -57,6 +58,30 @@ export function MemoryWorkspace(): JSX.Element {
   useEffect(() => {
     void loadMemories()
   }, [loadMemories])
+
+  useEffect(() => {
+    // Root cause: the list was loaded only on mount while chat completion
+    // happened over WebSocket, so a mounted Memory page could show a stale list.
+    const unsubComplete = wsService.on('task.complete' as WSEventType, () => {
+      void loadMemories()
+    })
+
+    const pollInterval = setInterval(() => {
+      if (!isLoading) void loadMemories()
+    }, 30000)
+
+    const handleFocus = (): void => {
+      void loadMemories()
+    }
+
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      unsubComplete()
+      clearInterval(pollInterval)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [isLoading, loadMemories])
 
   const handleSearch = useCallback(
     async (query: string) => {
@@ -87,14 +112,13 @@ export function MemoryWorkspace(): JSX.Element {
     try {
       await deleteMemory(id)
       removeMemory(id)
-      setStatsCount((count) => Math.max(0, count - 1))
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete memory.')
     }
   }
 
   const visibleMemories: MemoryItem[] = searchQuery ? searchResults : memories
-  const countLabel = statsCount || totalCount
+  const countLabel = totalCount
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-transparent animate-fade-up">
