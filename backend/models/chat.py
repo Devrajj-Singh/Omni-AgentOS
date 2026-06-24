@@ -28,6 +28,10 @@ class ChatRequest(BaseModel):
         default=False,
         description="Skip human approvals for write and command tools"
     )
+    recently_opened_files: list[str] = Field(
+        default_factory=list,
+        description="Recently active developer-mode files"
+    )
 
     class Config:
         json_schema_extra = {
@@ -37,7 +41,8 @@ class ChatRequest(BaseModel):
                 "conversation_history": [],
                 "workspace_path": None,
                 "active_file_path": None,
-                "autonomous_mode": False
+                "autonomous_mode": False,
+                "recently_opened_files": []
             }
         }
 

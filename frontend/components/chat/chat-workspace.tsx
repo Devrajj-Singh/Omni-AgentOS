@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FolderOpen } from 'lucide-react'
 import { agentStyle } from '@/lib/agent-styles'
 import { sendChatMessage } from '@/services/api'
@@ -175,10 +175,15 @@ export function ChatWorkspace(): JSX.Element {
   const addEvent = useActivityStore((state) => state.addEvent)
   const workspacePath = useDeveloperStore((state) => state.workspace.rootPath)
   const activeFilePath = useDeveloperStore((state) => state.activeFilePath)
+  const openedFiles = useDeveloperStore((state) => state.openedFiles)
   const autonomousMode = useUIStore((state) => state.autonomousMode)
   const approvals = useApprovalStore((state) => state.pendingApprovals)
   const assistantMessageIdRef = useRef<string | null>(null)
   const [draft, setDraft] = useState('')
+  const recentlyOpenedFiles = useMemo(
+    () => openedFiles.map((file) => file.path),
+    [openedFiles]
+  )
 
   useEffect(() => {
     const unsubStart = wsService.on('task.start', (event) => {
@@ -337,7 +342,8 @@ export function ChatWorkspace(): JSX.Element {
           conversationHistory,
           workspacePath,
           activeFilePath,
-          autonomousMode
+          autonomousMode,
+          recentlyOpenedFiles
         )
         useChatStore.getState().setCurrentTaskId(task_id)
       } catch (error) {
@@ -348,7 +354,7 @@ export function ChatWorkspace(): JSX.Element {
         addEvent({ label: '[Error]', message, status: 'error' })
       }
     },
-    [activeFilePath, addEvent, autonomousMode, sessionId, workspacePath]
+    [activeFilePath, addEvent, autonomousMode, recentlyOpenedFiles, sessionId, workspacePath]
   )
 
   return (

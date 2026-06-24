@@ -88,6 +88,7 @@ class OrchestratorState(TypedDict):
     autonomous_mode: bool
     conversation_history: list[dict[str, Any]]
     memory_context: str
+    project_context: str
     final_response: str | None
     task_id: str
 
@@ -169,6 +170,7 @@ async def run_orchestrated(
     on_thinking: Callable[[str], Awaitable[None]],
     on_approval_required: Callable[[str, str, dict[str, Any], str, str], Awaitable[None]],
     on_handoff: Callable[[str | None, str, str], Awaitable[None]],
+    project_context: str = "",
 ) -> str:
     """Route simple requests to Coder or complex requests through the graph."""
     token_char_count = 0
@@ -208,12 +210,15 @@ async def run_orchestrated(
     if not _is_multi_agent_task(message):
         log_event("routing_decision", task_id, agent=None, route="direct_coder")
         await emit_handoff(None, "coder", "Single-step request routed directly")
+        effective_memory_context = "\n\n".join(
+            filter(None, [project_context, memory_context])
+        ).strip()
         response = await run_coder_agent(
             message=message,
             conversation_history=conversation_history,
             workspace_root=workspace_root,
             active_file_path=active_file_path,
-            memory_context=memory_context,
+            memory_context=effective_memory_context,
             autonomous_mode=autonomous_mode,
             on_token=counting_on_token,
             on_tool_call=wrapped_on_tool_call,
@@ -257,7 +262,9 @@ async def run_orchestrated(
         await emit_handoff(from_agent, "coder", "Executing the plan")
         await on_thinking("Implementing...")
 
-        coder_context = state["memory_context"]
+        coder_context = "\n\n".join(
+            filter(None, [state["project_context"], state["memory_context"]])
+        ).strip()
         research = state.get("research_findings") or ""
         if research:
             research_trimmed = research[:1500]
@@ -335,6 +342,7 @@ async def run_orchestrated(
         "autonomous_mode": autonomous_mode,
         "conversation_history": conversation_history,
         "memory_context": memory_context,
+        "project_context": project_context,
         "final_response": None,
         "task_id": task_id,
     }
