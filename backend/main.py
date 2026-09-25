@@ -15,6 +15,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dependencies.redis_client import close_redis_client
 from tools.websearch import TAVILY_AVAILABLE
 
 from routers import approval, chat, health, memory, observability, research, session, settings_router, websocket, workspace
@@ -52,6 +53,7 @@ async def lifespan(app: FastAPI):
     logger.info("✅ Environment configuration validated")
     yield
     logger.info("🛑 Omni AgentOS Backend shutting down at %s", datetime.utcnow().isoformat())
+    await close_redis_client()
 
 
 def create_app() -> FastAPI:
