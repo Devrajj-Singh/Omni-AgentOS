@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { Loader2, Send } from 'lucide-react'
+import { useApprovalStore } from '@/store/approval-store'
 import { AutonomousToggle } from './autonomous-toggle'
 
 export interface ChatInputProps {
@@ -15,6 +16,7 @@ export interface ChatInputProps {
 export function ChatInput({ onSend, disabled, value, onValueChange, contextLabel }: ChatInputProps): JSX.Element {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const previousDisabledRef = useRef(disabled)
+  const dismissResolvedApprovals = useApprovalStore((state) => state.dismissResolvedApprovals)
 
   useEffect(() => {
     const textarea = textareaRef.current
@@ -33,6 +35,7 @@ export function ChatInput({ onSend, disabled, value, onValueChange, contextLabel
   const submit = (): void => {
     const trimmed = value.trim()
     if (!trimmed || disabled) return
+    dismissResolvedApprovals()
     onSend(trimmed)
     onValueChange('')
   }

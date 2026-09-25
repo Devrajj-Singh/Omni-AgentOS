@@ -10,10 +10,10 @@ from dataclasses import dataclass, field
 
 AVAILABLE_MODELS = [
     {
-        "id": "llama-3.3-70b-versatile",
-        "name": "Llama 3.3 70B",
+        "id": "openai/gpt-oss-120b",
+        "name": "GPT-OSS 120B",
         "description": "Best quality, recommended for complex tasks",
-        "provider": "Groq",
+        "provider": "OpenAI",
         "speed": "fast",
     },
     {
@@ -22,13 +22,6 @@ AVAILABLE_MODELS = [
         "description": "Fastest responses, good for simple tasks",
         "provider": "Groq",
         "speed": "instant",
-    },
-    {
-        "id": "mixtral-8x7b-32768",
-        "name": "Mixtral 8x7B",
-        "description": "Strong reasoning, large context window (32K)",
-        "provider": "Groq",
-        "speed": "fast",
     },
     {
         "id": "gemma2-9b-it",
@@ -42,7 +35,7 @@ AVAILABLE_MODELS = [
 
 @dataclass
 class AppSettings:
-    active_model: str = "llama-3.3-70b-versatile"
+    active_model: str = "openai/gpt-oss-120b"
     max_file_size_kb: int = 500
     excluded_dirs: list[str] = field(
         default_factory=lambda: [

@@ -47,3 +47,7 @@ backend/uploads/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# OpenCode Configurations
+opencode.json
+AGENTS.md

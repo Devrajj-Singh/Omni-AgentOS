@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 import time
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 
@@ -12,6 +13,10 @@ from langchain_groq import ChatGroq
 from langgraph.graph import END, StateGraph
 
 from agents.coder_agent import run_agent as run_coder_agent
+from agents.reflection import (
+    _should_reflect,
+    reflect_on_response,
+)
 from configs.settings import app_settings
 from observability.logger import log_event, timed_span
 from tools.websearch import TAVILY_API_KEY, TAVILY_AVAILABLE, web_search
@@ -31,12 +36,23 @@ Rules:
   the Coder already knows them.
 - Respond with ONLY a numbered list of steps, nothing else."""
 
-REVIEWER_PROMPT = """You are the Reviewer agent in a multi-agent system. You will
-be shown the original task and the Coder/Researcher's output. Check it is
-complete, correct, and addresses the original request. If it's good, respond
-with "APPROVED: " followed by a one-sentence summary for the user. If something
-is missing or wrong, respond with "REVISE: " followed by what's missing - be
-specific and brief."""
+REVIEWER_PROMPT = """You are the Reviewer agent in a multi-agent AI system.
+You have been given the original task and the Coder agent's output.
+
+Your job is to produce the FINAL response the user will see. You have two options:
+
+Option A - The output is complete, correct, and clear:
+Respond with "APPROVED: " followed by the output verbatim. No changes.
+
+Option B - The output has errors, gaps, or unclear parts:
+Respond with "REVISED: " followed by your corrected, complete version.
+Do not explain what you changed. Output the corrected response only.
+
+Rules:
+- For code: only flag errors that would actually break execution.
+- Keep the same format and length as the original unless a fix requires more.
+- If in doubt, approve - don't add unnecessary hedges or caveats.
+- Never output both versions. Never explain your decision."""
 
 MULTI_AGENT_SIGNAL_TERMS = {
     "architect",
@@ -132,6 +148,37 @@ def _research_available() -> bool:
     return bool(TAVILY_API_KEY and TAVILY_AVAILABLE)
 
 
+async def _reflect_and_amend(
+    original_request: str,
+    draft_response: str,
+    task_id: str,
+    on_thinking: Callable[[str], Awaitable[None]],
+    on_token: Callable[[str], Awaitable[None]],
+) -> str:
+    """
+    Run reflection on an already-streamed response. If reflection produces
+    a meaningfully different result, stream an amendment token.
+    If the response is good as-is, return it silently with no extra output.
+    """
+    if not _should_reflect(draft_response):
+        return draft_response
+
+    await on_thinking("Reflecting on response...")
+
+    was_improved, final = await reflect_on_response(
+        original_request=original_request,
+        draft_response=draft_response,
+        task_id=task_id,
+    )
+
+    if was_improved and final and final != draft_response:
+        amendment = f"\n\n---\n_Reflection: {final}_"
+        await on_token(amendment)
+        return draft_response + amendment
+
+    return draft_response
+
+
 async def _logged_tool_call(
     task_id: str,
     on_tool_call: Callable[[str, dict[str, Any]], Awaitable[None]],
@@ -169,6 +216,7 @@ async def run_orchestrated(
     on_tool_result: Callable[[str, str], Awaitable[None]],
     on_thinking: Callable[[str], Awaitable[None]],
     on_approval_required: Callable[[str, str, dict[str, Any], str, str], Awaitable[None]],
+    on_approval_resolved: Callable[[str, str], Awaitable[None]],
     on_handoff: Callable[[str | None, str, str], Awaitable[None]],
     project_context: str = "",
 ) -> str:
@@ -225,6 +273,14 @@ async def run_orchestrated(
             on_tool_result=wrapped_on_tool_result,
             on_thinking=on_thinking,
             on_approval_required=on_approval_required,
+            on_approval_resolved=on_approval_resolved,
+        )
+        response = await _reflect_and_amend(
+            original_request=message,
+            draft_response=response,
+            task_id=task_id,
+            on_thinking=on_thinking,
+            on_token=counting_on_token,
         )
         return finish_response(response)
 
@@ -290,6 +346,7 @@ async def run_orchestrated(
                 on_tool_result=wrapped_on_tool_result,
                 on_thinking=on_thinking,
                 on_approval_required=on_approval_required,
+                on_approval_resolved=on_approval_resolved,
             )
         log_event("coder_complete", task_id, agent="coder", output_preview=coder_output[:200])
         return {"coder_output": coder_output}
@@ -306,11 +363,17 @@ async def run_orchestrated(
             review_text = response.content if isinstance(response.content, str) else str(response.content)
         log_event("review_complete", task_id, agent="reviewer", verdict=review_text[:200])
 
-        if review_text.strip().upper().startswith("APPROVED"):
-            summary = review_text.split(":", 1)[-1].strip() if ":" in review_text else review_text
-            final_response = f"{coder_output}\n\n_Reviewed: {summary}_"
+        stripped = review_text.strip()
+        if stripped.startswith("APPROVED: "):
+            final_response = stripped[len("APPROVED: "):].strip()
+            if not final_response:
+                final_response = coder_output
+        elif stripped.startswith("REVISED: "):
+            final_response = stripped[len("REVISED: "):].strip()
+            if not final_response:
+                final_response = coder_output
         else:
-            final_response = f"{coder_output}\n\n_Review note: {review_text}_"
+            final_response = coder_output
         return {"review_notes": review_text, "final_response": final_response}
 
     def route_after_planner(state: OrchestratorState) -> str:
