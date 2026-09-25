@@ -4,8 +4,10 @@ import type { ApprovalRequest } from '@/types'
 interface ApprovalState {
   pendingApprovals: ApprovalRequest[]
   addApproval: (request: ApprovalRequest) => void
-  resolveApproval: (approvalId: string, decision: 'approved' | 'rejected') => void
+  resolveApproval: (approvalId: string, decision: 'approved' | 'rejected' | 'timeout') => void
   completeApproval: (approvalId: string) => void
+  dismissApproval: (approvalId: string) => void
+  dismissResolvedApprovals: () => void
   clearApprovals: () => void
 }
 
@@ -30,6 +32,20 @@ export const useApprovalStore = create<ApprovalState>()((set) => ({
         approval.approvalId === approvalId && approval.status === 'approved'
           ? { ...approval, status: 'completed' }
           : approval
+      ),
+    })),
+
+  dismissApproval: (approvalId) =>
+    set((state) => ({
+      pendingApprovals: state.pendingApprovals.filter(
+        (approval) => approval.approvalId !== approvalId
+      ),
+    })),
+
+  dismissResolvedApprovals: () =>
+    set((state) => ({
+      pendingApprovals: state.pendingApprovals.filter(
+        (approval) => approval.status === 'pending'
       ),
     })),
 

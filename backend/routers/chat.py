@@ -133,6 +133,17 @@ async def orchestrate_streaming(
                 )
             )
 
+        async def on_approval_resolved(approval_id: str, decision: str) -> None:
+            await manager.send_event(
+                session_id,
+                WSEvent(
+                    type=WSEventType.APPROVAL_RESOLVED,
+                    task_id=task_id,
+                    payload={"approvalId": approval_id, "decision": decision},
+                    timestamp=datetime.utcnow()
+                )
+            )
+
         async def on_handoff(from_agent: str | None, to_agent: str, reason: str) -> None:
             await manager.send_event(
                 session_id,
@@ -162,6 +173,7 @@ async def orchestrate_streaming(
             on_tool_result=on_tool_result,
             on_thinking=on_thinking,
             on_approval_required=on_approval_required,
+            on_approval_resolved=on_approval_resolved,
             on_handoff=on_handoff,
         )
 

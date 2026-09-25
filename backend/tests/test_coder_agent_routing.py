@@ -17,8 +17,15 @@ def test_generic_file_summary_is_document_query():
     assert _is_document_query("what does this file say") is True
 
 
+def test_list_files_workspace_query_is_not_document_query():
+    assert _is_document_query("list the files in this directory", "C:/workspace") is False
+
+
 def test_workspace_action_tools_exclude_document_search():
     async def on_approval_required(*args):
+        return None
+
+    async def on_approval_resolved(*args):
         return None
 
     loop = asyncio.new_event_loop()
@@ -27,6 +34,7 @@ def test_workspace_action_tools_exclude_document_search():
             workspace_root="C:/workspace",
             autonomous_mode=False,
             on_approval_required=on_approval_required,
+            on_approval_resolved=on_approval_resolved,
             approval_loop=loop,
             allow_document_search=_is_document_query("create a readme.md file in root"),
         )

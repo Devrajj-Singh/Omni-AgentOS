@@ -206,6 +206,7 @@ async def test_orchestrate_streaming_with_conversation_history():
         mock_run_orchestrated.assert_called_once()
         assert mock_run_orchestrated.call_args.kwargs["autonomous_mode"] is False
         assert "on_approval_required" in mock_run_orchestrated.call_args.kwargs
+        assert "on_approval_resolved" in mock_run_orchestrated.call_args.kwargs
         assert "on_handoff" in mock_run_orchestrated.call_args.kwargs
         assert mock_run_orchestrated.call_args.kwargs["conversation_history"] == [
             {"role": "user", "content": "First message"},
@@ -269,6 +270,56 @@ async def test_orchestrate_streaming_emits_approval_required():
             "args": {"path": "test.py"},
             "description": "Write 12 characters to `test.py`",
             "riskLevel": "medium",
+        }
+
+
+@pytest.mark.asyncio
+async def test_orchestrate_streaming_emits_approval_resolved():
+    """Test approval resolved callback emits approval.resolved events."""
+    session_id = "test-session-123"
+    task_id = "test-task-456"
+    user_message = Message(
+        id="user-msg-1",
+        role="user",
+        content="Create a file",
+        is_streaming=False
+    )
+
+    with patch('routers.chat.manager') as mock_manager, \
+         patch('routers.chat.run_orchestrated') as mock_run_orchestrated, \
+         patch('routers.chat.memory_store') as mock_memory_store, \
+         patch('routers.chat.session_store') as mock_session_store:
+
+        mock_manager.send_event = AsyncMock()
+        mock_session_store.append_messages = MagicMock()
+        mock_memory_store.get_relevant_context.return_value = ""
+        mock_memory_store.save_turn = MagicMock()
+
+        async def mock_agent(**kwargs):
+            await kwargs["on_approval_resolved"]("approval-1", "timeout")
+            return "Done."
+
+        mock_run_orchestrated.side_effect = mock_agent
+
+        await orchestrate_streaming(
+            session_id=session_id,
+            task_id=task_id,
+            user_message=user_message,
+            conversation_history=[],
+            workspace_path="C:/workspace",
+            active_file_path=None,
+            autonomous_mode=False,
+        )
+
+        approval_events = [
+            call_args[0][1]
+            for call_args in mock_manager.send_event.call_args_list
+            if call_args[0][1].type == WSEventType.APPROVAL_RESOLVED
+        ]
+        assert len(approval_events) == 1
+        assert approval_events[0].payload == {
+            "approvalId": "approval-1",
+            "decision": "timeout",
         }
 
 

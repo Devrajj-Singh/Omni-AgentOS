@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import asyncio
 import concurrent.futures
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -30,10 +31,10 @@ DOCUMENT_QUERY_TERMS = {
     "summary", "analyze", "analyse",
 }
 WORKSPACE_ACTION_TERMS = {
-    "add", "append", "build", "change", "command", "create", "delete", "edit",
-    "execute", "fix", "generate", "install", "make", "modify", "move", "npm",
-    "patch", "pip", "read", "rename", "replace", "run", "save", "terminal",
-    "update", "write",
+    "add", "append", "build", "change", "command", "create", "delete", "display",
+    "edit", "execute", "fix", "generate", "install", "list", "make", "modify",
+    "move", "npm", "patch", "pip", "read", "rename", "replace", "run", "save",
+    "show", "terminal", "update", "write",
 }
 EXPLICIT_DOCUMENT_TERMS = {
     "upload", "uploaded", "document", "documents", "doc", "docs", "pdf",
@@ -41,6 +42,10 @@ EXPLICIT_DOCUMENT_TERMS = {
     "summary", "analyze", "analyse",
 }
 GENERIC_DOCUMENT_TERMS = DOCUMENT_QUERY_TERMS | {"this", "that", "the", "what", "does", "say", "content"}
+HALLUCINATED_TOOL_CALL_PATTERN = re.compile(
+    r"<function\s*\(|</function>|\bwrite_file_tool\s*\(\s*[{\"]|\brun_command_tool\s*\(\s*[{\"]",
+    re.IGNORECASE,
+)
 
 SYSTEM_PROMPT = """You are Omni AgentOS - an intelligent AI coding and research assistant.
 
@@ -92,6 +97,17 @@ def _query_terms(query: str) -> set[str]:
         .replace("\\", " ")
     )
     return {term for term in normalized.split() if len(term) > 2}
+
+
+def _looks_like_hallucinated_tool_call(text: str) -> bool:
+    """
+    Detect when the model emitted pseudo tool-call syntax as plain text
+    instead of making a real LangChain tool call. This happens occasionally
+    with Groq-hosted models: the response text looks like it describes a
+    tool invocation, but no tool actually executed - no file was written,
+    no command was run, no approval was requested.
+    """
+    return bool(HALLUCINATED_TOOL_CALL_PATTERN.search(text))
 
 
 def _is_document_query(message: str, workspace_root: str | None = None) -> bool:
@@ -188,6 +204,7 @@ def _await_approval(
     risk_level: str,
     approval_loop: asyncio.AbstractEventLoop,
     on_approval_required: Callable[[str, str, dict[str, Any], str, str], Awaitable[None]],
+    on_approval_resolved: Callable[[str, str], Awaitable[None]],
 ) -> ApprovalDecision:
     """Notify the UI and wait for a decision from a synchronous tool."""
     notify_future = asyncio.run_coroutine_threadsafe(
@@ -208,6 +225,14 @@ def _await_approval(
         return decision_future.result(timeout=35)
     except (TimeoutError, concurrent.futures.TimeoutError):
         approval_store.resolve(request_id, ApprovalDecision.TIMEOUT)
+        notify_resolved = asyncio.run_coroutine_threadsafe(
+            on_approval_resolved(request_id, "timeout"),
+            approval_loop,
+        )
+        try:
+            notify_resolved.result(timeout=5)
+        except Exception:
+            pass
         return ApprovalDecision.TIMEOUT
 
 
@@ -215,6 +240,7 @@ def _build_tools(
     workspace_root: str | None,
     autonomous_mode: bool,
     on_approval_required: Callable[[str, str, dict[str, Any], str, str], Awaitable[None]],
+    on_approval_resolved: Callable[[str, str], Awaitable[None]],
     approval_loop: asyncio.AbstractEventLoop,
     allow_document_search: bool,
 ) -> list:
@@ -252,8 +278,16 @@ def _build_tools(
             return "Tool call limit reached for write_file_tool. Stop and summarize what is already done."
         if not autonomous_mode:
             normalized_path = path.lower()
+            file_exists = False
+            if workspace_root:
+                candidate = os.path.abspath(os.path.join(workspace_root, path))
+                file_exists = os.path.isfile(candidate)
             risk = "high" if any(term in normalized_path for term in [".env", "config", "secret"]) else "medium"
-            description = f"Write {len(content)} characters to `{path}`"
+            if file_exists:
+                risk = "high"
+                description = f"OVERWRITE existing file: write {len(content)} characters to `{path}` (this file already exists and will be replaced)"
+            else:
+                description = f"Write {len(content)} characters to `{path}`"
             request = approval_store.create(
                 tool="write_file_tool",
                 args={"path": path, "content": _preview_text(content)},
@@ -269,6 +303,7 @@ def _build_tools(
                 risk,
                 approval_loop,
                 on_approval_required,
+                on_approval_resolved,
             )
             if decision == ApprovalDecision.TIMEOUT:
                 return "Action timed out waiting for approval. Please try again."
@@ -357,6 +392,7 @@ def _build_tools(
                 risk,
                 approval_loop,
                 on_approval_required,
+                on_approval_resolved,
             )
             if decision == ApprovalDecision.TIMEOUT:
                 return "Action timed out waiting for approval. Please try again."
@@ -470,6 +506,7 @@ async def run_agent(
     on_tool_result: Callable[[str, str], Awaitable[None]],
     on_thinking: Callable[[str], Awaitable[None]],
     on_approval_required: Callable[[str, str, dict[str, Any], str, str], Awaitable[None]],
+    on_approval_resolved: Callable[[str, str], Awaitable[None]],
 ) -> str:
     """
     Run the ReAct agent and stream events via callbacks.
@@ -489,6 +526,7 @@ async def run_agent(
         workspace_root,
         autonomous_mode,
         on_approval_required,
+        on_approval_resolved,
         approval_loop,
         allow_document_search=_is_document_query(message, workspace_root),
     )
@@ -614,14 +652,31 @@ async def run_agent(
             ("tool call validation failed" in error_text and "was not in request.tools" in error_text)
             or "failed_generation" in error_text
         ):
-            full_response = (
-                "I wasn't able to process that request. "
-                "If you're asking about a workspace or files, please open a folder "
-                "in Developer mode first. Otherwise, try rephrasing your question."
-            )
+            if workspace_root:
+                # A workspace is already open, so "open a folder" is not the
+                # real cause - the model failed to produce a valid tool call.
+                full_response = (
+                    "I ran into an error processing that request. "
+                    "Please try again, or rephrase it."
+                )
+            else:
+                full_response = (
+                    "I wasn't able to process that request. "
+                    "If you're asking about a workspace or files, please open a folder "
+                    "in Developer mode first. Otherwise, try rephrasing your question."
+                )
             await on_token(full_response)
             return full_response
         raise
+
+    if full_response and _looks_like_hallucinated_tool_call(full_response):
+        correction = (
+            "\n\n---\n"
+            "_Note: this response contained a malformed tool call and no file "
+            "was written or command was run. Please try the request again._"
+        )
+        full_response += correction
+        await on_token(correction)
 
     if not full_response and last_tool_result:
         full_response = f"Done. {last_tool_result}"

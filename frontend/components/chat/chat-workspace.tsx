@@ -58,7 +58,7 @@ interface ApprovalRequiredPayload {
 
 interface ApprovalResolvedPayload {
   approvalId: string
-  decision: 'approved' | 'rejected'
+  decision: 'approved' | 'rejected' | 'timeout'
 }
 
 function hasStringProperty(payload: unknown, key: string): payload is Record<string, string> {
@@ -160,7 +160,13 @@ function getApprovalResolvedPayload(event: WSEvent): ApprovalResolvedPayload | n
   if (!hasStringProperty(event.payload, 'approvalId') || !hasStringProperty(event.payload, 'decision')) {
     return null
   }
-  if (event.payload.decision !== 'approved' && event.payload.decision !== 'rejected') return null
+  if (
+    event.payload.decision !== 'approved' &&
+    event.payload.decision !== 'rejected' &&
+    event.payload.decision !== 'timeout'
+  ) {
+    return null
+  }
   return { approvalId: event.payload.approvalId, decision: event.payload.decision }
 }
 
@@ -306,9 +312,12 @@ export function ChatWorkspace(): JSX.Element {
       if (!payload) return
 
       useApprovalStore.getState().resolveApproval(payload.approvalId, payload.decision)
+      const label =
+        payload.decision === 'approved' ? 'Approved' :
+        payload.decision === 'timeout' ? 'Timed out' : 'Rejected'
       addEvent({
         label: '[Approval]',
-        message: `${payload.decision === 'approved' ? 'Approved' : 'Rejected'}: ${payload.approvalId.slice(0, 8)}`,
+        message: `${label}: ${payload.approvalId.slice(0, 8)}`,
         status: payload.decision === 'approved' ? 'done' : 'error',
       })
     })
