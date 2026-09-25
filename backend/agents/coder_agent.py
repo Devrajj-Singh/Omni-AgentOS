@@ -197,7 +197,6 @@ def _preview_text(text: str, max_length: int = 200) -> str:
 
 
 def _await_approval(
-    request_id: str,
     tool_name: str,
     args: dict[str, Any],
     description: str,
@@ -206,34 +205,41 @@ def _await_approval(
     on_approval_required: Callable[[str, str, dict[str, Any], str, str], Awaitable[None]],
     on_approval_resolved: Callable[[str, str], Awaitable[None]],
 ) -> ApprovalDecision:
-    """Notify the UI and wait for a decision from a synchronous tool."""
-    notify_future = asyncio.run_coroutine_threadsafe(
-        on_approval_required(request_id, tool_name, args, description, risk_level),
-        approval_loop,
-    )
-    notify_future.result(timeout=5)
+    """Create an approval in Redis, notify the UI, and block this worker
+    thread until a decision is published - from this worker or any other."""
 
-    request = approval_store.get(request_id)
-    if request is None:
+    async def _create_and_notify() -> str:
+        request_id = await approval_store.create(
+            tool=tool_name, args=args, description=description, risk_level=risk_level,
+        )
+        await on_approval_required(request_id, tool_name, args, description, risk_level)
+        return request_id
+
+    create_future = asyncio.run_coroutine_threadsafe(_create_and_notify(), approval_loop)
+    try:
+        request_id = create_future.result(timeout=10)
+    except Exception:
         return ApprovalDecision.TIMEOUT
 
     decision_future = asyncio.run_coroutine_threadsafe(
-        asyncio.wait_for(request.future, timeout=30.0),
+        approval_store.wait_for_decision(request_id, timeout=30.0),
         approval_loop,
     )
     try:
-        return decision_future.result(timeout=35)
+        decision = decision_future.result(timeout=35)
     except (TimeoutError, concurrent.futures.TimeoutError):
-        approval_store.resolve(request_id, ApprovalDecision.TIMEOUT)
+        decision = ApprovalDecision.TIMEOUT
+
+    if decision == ApprovalDecision.TIMEOUT:
         notify_resolved = asyncio.run_coroutine_threadsafe(
-            on_approval_resolved(request_id, "timeout"),
-            approval_loop,
+            on_approval_resolved(request_id, "timeout"), approval_loop,
         )
         try:
             notify_resolved.result(timeout=5)
         except Exception:
             pass
-        return ApprovalDecision.TIMEOUT
+
+    return decision
 
 
 def _build_tools(
@@ -288,15 +294,7 @@ def _build_tools(
                 description = f"OVERWRITE existing file: write {len(content)} characters to `{path}` (this file already exists and will be replaced)"
             else:
                 description = f"Write {len(content)} characters to `{path}`"
-            request = approval_store.create(
-                tool="write_file_tool",
-                args={"path": path, "content": _preview_text(content)},
-                description=description,
-                risk_level=risk,
-                loop=approval_loop,
-            )
             decision = _await_approval(
-                request.approval_id,
                 "write_file_tool",
                 {"path": path, "content": _preview_text(content, 120)},
                 description,
@@ -377,15 +375,7 @@ def _build_tools(
             high_risk_keywords = ["rm ", "del ", "format", "drop ", "delete", "truncate"]
             risk = "high" if any(keyword in lowered_command for keyword in high_risk_keywords) else "medium"
             description = f"Run command: `{command}`"
-            request = approval_store.create(
-                tool="run_command_tool",
-                args={"command": command},
-                description=description,
-                risk_level=risk,
-                loop=approval_loop,
-            )
             decision = _await_approval(
-                request.approval_id,
                 "run_command_tool",
                 {"command": command},
                 description,

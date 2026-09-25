@@ -33,7 +33,7 @@ async def resolve_approval(
         else ApprovalDecision.REJECTED
     )
 
-    resolved = approval_store.resolve(approval_id, decision)
+    resolved = await approval_store.resolve(approval_id, decision)
     if not resolved:
         raise HTTPException(
             status_code=404,
