@@ -1,6 +1,7 @@
 """Multi-agent orchestrator for Planner, Researcher, Coder, and Reviewer."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -24,18 +25,101 @@ from tools.websearch import TAVILY_API_KEY, TAVILY_AVAILABLE, web_search
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
-PLANNER_PROMPT = """You are the Planner agent in a multi-agent system. Break the
-user's request into 2-5 concrete steps for the Coder agent to execute.
+PREV_STEP_CONTEXT_CHARS = 2000
+
+PLANNER_PROMPT = """You are the Planner agent in a multi-agent AI system.
+Break the user's project request into 2-5 concrete, actionable steps.
+Output your response as a valid JSON object matching this exact schema:
+
+{
+  "project_name": "short-slug-name",
+  "steps": [
+    {
+      "id": "step-1",
+      "title": "Short title (under 8 words)",
+      "agent": "coder",
+      "action": "write_file",
+      "approval_required": true,
+      "description": "Specific instruction for what to create, write, or run"
+    }
+  ]
+}
 
 Rules:
-- Each step must be a direct action: write code, create a file, run a command,
-  edit a file. NOT "research" or "look up" steps.
-- Only include a research step if the user EXPLICITLY asked to search for
-  something online, or if the technology/library is genuinely obscure and
-  unlikely to be in the model's training data.
-- For common frameworks (FastAPI, React, Python, Node, etc.), skip research -
-  the Coder already knows them.
-- Respond with ONLY a numbered list of steps, nothing else."""
+1. "steps" must have between 2 and 5 steps.
+2. "agent" must be one of: "coder", "researcher", "reviewer".
+3. "action" must be one of: "write_file", "run_command", "research", "review".
+4. "approval_required": MUST be true for destructive actions ("write_file", "run_command"). Must be false for "research" and "review".
+5. Only include a "researcher" step if the user explicitly asked to search online or for documentation. Common frameworks (FastAPI, React, Python, Node, etc.) do NOT need research.
+6. Common steps:
+   - step-1: Create project structure & config files (action: "write_file", agent: "coder", approval_required: true)
+   - step-2: Implement core logic/endpoints (action: "write_file", agent: "coder", approval_required: true)
+   - step-3: Verification or smoke test (action: "run_command", agent: "coder", approval_required: true)
+7. Respond ONLY with the valid JSON object. No preamble, no explanation, no markdown text outside the JSON."""
+
+
+def _build_step_context(assembled_outputs: list[str]) -> str:
+    """Summarize previous steps for context, respecting token budget."""
+    if not assembled_outputs:
+        return ""
+    combined = "\n\n---\n\n".join(assembled_outputs)
+    if len(combined) <= PREV_STEP_CONTEXT_CHARS:
+        return f"Previous steps output:\n{combined}"
+    truncated = combined[:PREV_STEP_CONTEXT_CHARS]
+    return f"Previous steps output (truncated):\n{truncated}\n[...truncated for context window]"
+
+
+def _parse_task_graph(response_text: str) -> dict[str, Any] | None:
+    """Parse JSON task graph from planner response, handling code fences or minor LLM formatting.
+    Returns None if parsing fails so caller can fall back to legacy plan path.
+    """
+    raw = response_text.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        raw = raw.strip()
+
+    match = re.search(r"(\{.*\})", raw, re.DOTALL)
+    if match:
+        raw = match.group(1).strip()
+
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict) or "steps" not in data or not isinstance(data["steps"], list):
+            return None
+
+        valid_steps = []
+        for i, s in enumerate(data["steps"], start=1):
+            if not isinstance(s, dict):
+                continue
+            step_id = str(s.get("id") or f"step-{i}")
+            title = str(s.get("title") or f"Step {i}")
+            agent = str(s.get("agent") or "coder").lower()
+            if agent not in ("coder", "researcher", "reviewer"):
+                agent = "coder"
+            action = str(s.get("action") or "write_file").lower()
+            approval_req = bool(s.get("approval_required", action in ("write_file", "run_command")))
+            description = str(s.get("description") or title)
+            valid_steps.append({
+                "id": step_id,
+                "title": title,
+                "agent": agent,
+                "action": action,
+                "approval_required": approval_req,
+                "description": description,
+                "status": "pending",
+            })
+
+        if not valid_steps:
+            return None
+
+        project_name = str(data.get("project_name") or "project")
+        return {
+            "project_name": project_name,
+            "steps": valid_steps,
+        }
+    except Exception:
+        return None
 
 REVIEWER_PROMPT = """You are the Reviewer agent in a multi-agent AI system.
 You have been given the original task and the Coder agent's output.
@@ -97,6 +181,7 @@ EXPLICIT_RESEARCH_TERMS = {
 class OrchestratorState(TypedDict):
     task: str
     plan: list[str] | None
+    task_graph: dict[str, Any] | None
     research_findings: str | None
     coder_output: str | None
     review_notes: str | None
@@ -223,6 +308,8 @@ async def run_orchestrated(
     on_handoff: Callable[[str | None, str, str], Awaitable[None]],
     project_context: str = "",
     api_key: str | None = None,
+    on_task_graph_init: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    on_task_graph_update: Callable[[str, str, str], Awaitable[None]] | None = None,
 ) -> str:
     """Route simple requests to Coder or complex requests through the graph."""
     token_char_count = 0
@@ -294,15 +381,139 @@ async def run_orchestrated(
 
     async def planner_node(state: OrchestratorState) -> dict[str, Any]:
         await emit_handoff(None, "planner", "Multi-step request detected - planning")
-        await on_thinking("Planning the approach...")
+        await on_thinking("Planning the project approach...")
         with timed_span("agent_run", task_id, "planner"):
             response = await _get_llm(api_key).ainvoke(
                 [SystemMessage(content=PLANNER_PROMPT), HumanMessage(content=state["task"])]
             )
             plan_text = response.content if isinstance(response.content, str) else str(response.content)
-            plan = [line.strip() for line in plan_text.splitlines() if line.strip()]
-        log_event("plan_created", task_id, agent="planner", steps=plan)
-        return {"plan": plan}
+            task_graph = _parse_task_graph(plan_text)
+            if task_graph:
+                plan = [s["title"] for s in task_graph["steps"]]
+                log_event(
+                    "task_graph_created",
+                    task_id,
+                    agent="planner",
+                    project_name=task_graph["project_name"],
+                    steps=task_graph["steps"],
+                )
+                if on_task_graph_init:
+                    await on_task_graph_init(task_graph)
+            else:
+                plan = [line.strip() for line in plan_text.splitlines() if line.strip()]
+                log_event("plan_created", task_id, agent="planner", steps=plan)
+
+        return {"plan": plan, "task_graph": task_graph}
+
+    async def project_builder_node(state: OrchestratorState) -> dict[str, Any]:
+        task_graph = state.get("task_graph")
+        if not task_graph or not task_graph.get("steps"):
+            return {"coder_output": "No steps to execute."}
+
+        assembled_outputs: list[str] = []
+        research_findings = state.get("research_findings") or ""
+        prev_agent = "planner"
+
+        for step in task_graph["steps"]:
+            step_id = step["id"]
+            agent_name = step["agent"]
+            title = step["title"]
+            description = step["description"]
+
+            # 1. Update step status to running
+            if on_task_graph_update:
+                await on_task_graph_update(step_id, "running", agent_name)
+
+            await emit_handoff(prev_agent, agent_name, f"Executing: {title}")
+            prev_agent = agent_name
+
+            if agent_name == "researcher":
+                await on_thinking(f"Researching: {title}...")
+                with timed_span("agent_run", task_id, "researcher"):
+                    await wrapped_on_tool_call("web_search_tool", {"query": description})
+                    findings = web_search(description)
+                    await wrapped_on_tool_result("web_search_tool", findings[:500])
+                research_findings = f"{research_findings}\n\n{findings}".strip()
+                if on_task_graph_update:
+                    await on_task_graph_update(step_id, "done", agent_name)
+                continue
+
+            elif agent_name == "reviewer":
+                await on_thinking(f"Reviewing: {title}...")
+                current_assembled = "\n\n".join(assembled_outputs)
+                with timed_span("agent_run", task_id, "reviewer"):
+                    review_input = f"Task: {state['task']}\nStep: {description}\nCurrent Output:\n{current_assembled}"
+                    response = await _get_llm(api_key).ainvoke(
+                        [SystemMessage(content=REVIEWER_PROMPT), HumanMessage(content=review_input)]
+                    )
+                    review_text = response.content if isinstance(response.content, str) else str(response.content)
+                if on_task_graph_update:
+                    await on_task_graph_update(step_id, "done", agent_name)
+                continue
+
+            # Default: Coder agent
+            await on_thinking(f"Implementing: {title}...")
+
+            # Context budget
+            step_context_parts = []
+            if state["project_context"]:
+                step_context_parts.append(state["project_context"])
+            if state["memory_context"]:
+                step_context_parts.append(state["memory_context"])
+            if research_findings:
+                step_context_parts.append(f"Research findings:\n{research_findings[:1500]}")
+            prev_context = _build_step_context(assembled_outputs)
+            if prev_context:
+                step_context_parts.append(prev_context)
+            step_context = "\n\n".join(step_context_parts).strip()
+
+            step_message = (
+                f"Overall Project Goal: {state['task']}\n\n"
+                f"Current Step: {title}\n"
+                f"Action Required: {description}"
+            )
+
+            # Wrap approval callbacks to track awaiting_approval status on current step
+            async def step_on_approval_required(
+                approval_id: str,
+                tool_name: str,
+                args: dict[str, Any],
+                approval_desc: str,
+                risk_level: str,
+            ) -> None:
+                if on_task_graph_update:
+                    await on_task_graph_update(step_id, "awaiting_approval", agent_name)
+                await on_approval_required(approval_id, tool_name, args, approval_desc, risk_level)
+
+            async def step_on_approval_resolved(approval_id: str, decision: str) -> None:
+                if on_task_graph_update:
+                    next_status = "running" if decision == "approved" else "skipped"
+                    await on_task_graph_update(step_id, next_status, agent_name)
+                await on_approval_resolved(approval_id, decision)
+
+            with timed_span("agent_run", task_id, "coder"):
+                output = await run_coder_agent(
+                    message=step_message,
+                    conversation_history=state["conversation_history"],
+                    workspace_root=state["workspace_root"],
+                    active_file_path=state["active_file_path"],
+                    memory_context=step_context,
+                    autonomous_mode=state["autonomous_mode"],
+                    on_token=counting_on_token,
+                    on_tool_call=wrapped_on_tool_call,
+                    on_tool_result=wrapped_on_tool_result,
+                    on_thinking=on_thinking,
+                    on_approval_required=step_on_approval_required,
+                    on_approval_resolved=step_on_approval_resolved,
+                    api_key=api_key,
+                )
+
+            assembled_outputs.append(output)
+            if on_task_graph_update:
+                await on_task_graph_update(step_id, "done", agent_name)
+
+        final_assembled = "\n\n".join(assembled_outputs)
+        return {"coder_output": final_assembled, "final_response": final_assembled}
 
     async def researcher_node(state: OrchestratorState) -> dict[str, Any]:
         await emit_handoff("planner", "researcher", "Plan requires research")
@@ -384,10 +595,13 @@ async def run_orchestrated(
         return {"review_notes": review_text, "final_response": final_response}
 
     def route_after_planner(state: OrchestratorState) -> str:
+        if state.get("task_graph"):
+            return "project_builder"
         return "researcher" if _needs_research(state.get("plan")) and _research_available() else "coder"
 
     graph = StateGraph(OrchestratorState)
     graph.add_node("planner", planner_node)
+    graph.add_node("project_builder", project_builder_node)
     graph.add_node("researcher", researcher_node)
     graph.add_node("coder", coder_node)
     graph.add_node("reviewer", reviewer_node)
@@ -395,8 +609,13 @@ async def run_orchestrated(
     graph.add_conditional_edges(
         "planner",
         route_after_planner,
-        {"researcher": "researcher", "coder": "coder"},
+        {
+            "project_builder": "project_builder",
+            "researcher": "researcher",
+            "coder": "coder",
+        },
     )
+    graph.add_edge("project_builder", "reviewer")
     graph.add_edge("researcher", "coder")
     graph.add_edge("coder", "reviewer")
     graph.add_edge("reviewer", END)
@@ -404,6 +623,7 @@ async def run_orchestrated(
     initial_state: OrchestratorState = {
         "task": message,
         "plan": None,
+        "task_graph": None,
         "research_findings": None,
         "coder_output": None,
         "review_notes": None,
@@ -417,4 +637,13 @@ async def run_orchestrated(
         "task_id": task_id,
     }
     final_state = await graph.compile().ainvoke(initial_state)
-    return finish_response(final_state.get("final_response") or final_state.get("coder_output") or "")
+    draft_response = final_state.get("final_response") or final_state.get("coder_output") or ""
+    final_response = await _reflect_and_amend(
+        original_request=message,
+        draft_response=draft_response,
+        task_id=task_id,
+        on_thinking=on_thinking,
+        on_token=counting_on_token,
+        api_key=api_key,
+    )
+    return finish_response(final_response)

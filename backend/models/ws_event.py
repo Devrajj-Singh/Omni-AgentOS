@@ -17,6 +17,8 @@ class WSEventType(str, Enum):
     TOOL_RESULT = "tool.result"
     APPROVAL_REQUIRED = "approval.required"
     APPROVAL_RESOLVED = "approval.resolved"
+    TASK_GRAPH_INIT = "agent.task_graph_init"
+    TASK_GRAPH_UPDATE = "agent.task_graph_update"
     TASK_START = "task.start"
     TASK_COMPLETE = "task.complete"
     ERROR = "error"

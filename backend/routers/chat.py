@@ -167,6 +167,33 @@ async def orchestrate_streaming(
                 )
             )
 
+        async def on_task_graph_init(task_graph: dict) -> None:
+            await manager.send_event(
+                session_id,
+                WSEvent(
+                    type=WSEventType.TASK_GRAPH_INIT,
+                    task_id=task_id,
+                    payload=task_graph,
+                    timestamp=datetime.utcnow(),
+                ),
+            )
+
+        async def on_task_graph_update(step_id: str, status: str, agent: str) -> None:
+            await manager.send_event(
+                session_id,
+                WSEvent(
+                    type=WSEventType.TASK_GRAPH_UPDATE,
+                    task_id=task_id,
+                    payload={
+                        "stepId": step_id,
+                        "step_id": step_id,
+                        "status": status,
+                        "agent": agent,
+                    },
+                    timestamp=datetime.utcnow(),
+                ),
+            )
+
         full_response = await run_orchestrated(
             message=user_message.content,
             conversation_history=history_dicts,
@@ -184,6 +211,8 @@ async def orchestrate_streaming(
             on_approval_resolved=on_approval_resolved,
             on_handoff=on_handoff,
             api_key=api_key,
+            on_task_graph_init=on_task_graph_init,
+            on_task_graph_update=on_task_graph_update,
         )
 
         assistant_message = Message(

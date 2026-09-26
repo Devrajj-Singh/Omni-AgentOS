@@ -10,11 +10,12 @@ import { useApprovalStore } from '@/store/approval-store'
 import { useChatStore } from '@/store/chat-store'
 import { useDeveloperStore } from '@/store/developer-store'
 import { useUIStore } from '@/store/ui-store'
-import type { WSEvent } from '@/types'
+import type { WSEvent, TaskGraph, TaskGraphStepStatus } from '@/types'
 import { ApprovalBubble } from './approval-bubble'
 import { ChatInput } from './chat-input'
 import { MessageList } from './message-list'
 import { ArtifactsPanel } from './artifacts-panel'
+import { TaskGraphView } from './task-graph-view'
 
 interface TaskStartPayload {
   messageId: string
@@ -171,6 +172,34 @@ function getApprovalResolvedPayload(event: WSEvent): ApprovalResolvedPayload | n
   return { approvalId: event.payload.approvalId, decision: event.payload.decision }
 }
 
+function getTaskGraphInitPayload(event: WSEvent): TaskGraph | null {
+  if (
+    typeof event.payload === 'object' &&
+    event.payload !== null &&
+    'steps' in event.payload &&
+    Array.isArray((event.payload as { steps: unknown }).steps)
+  ) {
+    return event.payload as TaskGraph
+  }
+  return null
+}
+
+interface TaskGraphUpdatePayload {
+  stepId: string
+  status: TaskGraphStepStatus
+  agent?: string
+}
+
+function getTaskGraphUpdatePayload(event: WSEvent): TaskGraphUpdatePayload | null {
+  if (typeof event.payload !== 'object' || event.payload === null) return null
+  const raw = event.payload as Record<string, unknown>
+  const stepId = (raw.stepId ?? raw.step_id) as string | undefined
+  const status = raw.status as TaskGraphStepStatus | undefined
+  const agent = raw.agent as string | undefined
+  if (!stepId || !status) return null
+  return { stepId, status, agent }
+}
+
 function stringifyError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -179,6 +208,7 @@ export function ChatWorkspace(): JSX.Element {
   const messages = useChatStore((state) => state.messages)
   const isStreaming = useChatStore((state) => state.isStreaming)
   const sessionId = useChatStore((state) => state.sessionId)
+  const taskGraph = useChatStore((state) => state.taskGraph)
   const addEvent = useActivityStore((state) => state.addEvent)
   const workspacePath = useDeveloperStore((state) => state.workspace.rootPath)
   const activeFilePath = useDeveloperStore((state) => state.activeFilePath)
@@ -204,6 +234,7 @@ export function ChatWorkspace(): JSX.Element {
       if (!payload) return
 
       assistantMessageIdRef.current = payload.messageId
+      useChatStore.getState().clearTaskGraph()
       useChatStore.getState().startAssistantMessage(payload.messageId)
       addEvent({ label: '[Groq]', message: 'Streaming response...', status: 'running' })
     })
@@ -351,6 +382,30 @@ export function ChatWorkspace(): JSX.Element {
       })
     })
 
+    const unsubTaskGraphInit = wsService.on('agent.task_graph_init', (event) => {
+      const payload = getTaskGraphInitPayload(event)
+      if (!payload) return
+
+      useChatStore.getState().setTaskGraph(payload)
+      addEvent({
+        label: '[Plan]',
+        message: `Plan: ${payload.project_name || 'Project'} (${payload.steps.length} steps)`,
+        status: 'running',
+      })
+    })
+
+    const unsubTaskGraphUpdate = wsService.on('agent.task_graph_update', (event) => {
+      const payload = getTaskGraphUpdatePayload(event)
+      if (!payload) return
+
+      useChatStore.getState().updateTaskGraphStep(payload.stepId, payload.status, payload.agent)
+      addEvent({
+        label: '[Step]',
+        message: `${payload.stepId}: ${payload.status}${payload.agent ? ` (${payload.agent})` : ''}`,
+        status: payload.status === 'done' ? 'done' : payload.status === 'failed' ? 'error' : 'running',
+      })
+    })
+
     return () => {
       unsubStart()
       unsubToken()
@@ -362,6 +417,8 @@ export function ChatWorkspace(): JSX.Element {
       unsubAgentHandoff()
       unsubApprovalRequired()
       unsubApprovalResolved()
+      unsubTaskGraphInit()
+      unsubTaskGraphUpdate()
     }
   }, [addEvent])
 
@@ -522,6 +579,11 @@ export function ChatWorkspace(): JSX.Element {
           onRegenerate={handleRegenerate}
           onEditSubmit={handleEditSubmit}
         />
+        {taskGraph && (
+          <div className="px-4 py-2 shrink-0 max-w-3xl mx-auto w-full">
+            <TaskGraphView taskGraph={taskGraph} />
+          </div>
+        )}
         <div>
           {approvals.map((approval) => (
             <ApprovalBubble key={approval.approvalId} approval={approval} />
