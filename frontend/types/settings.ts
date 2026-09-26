@@ -12,4 +12,6 @@ export interface AppSettings {
   memoryCount: number
   maxFileSizeKb: number
   excludedDirs: string[]
+  hasUserApiKey?: boolean
+  userApiKey?: string | null
 }

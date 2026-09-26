@@ -17,6 +17,7 @@ from langchain_groq import ChatGroq
 from langgraph.prebuilt import create_react_agent
 
 from configs.settings import app_settings
+from dependencies.llm_factory import build_llm
 from execution.approval_store import ApprovalDecision, approval_store
 from memory.store import memory_store
 from tools.filesystem import list_directory, read_file, scan_repository, write_file
@@ -497,6 +498,7 @@ async def run_agent(
     on_thinking: Callable[[str], Awaitable[None]],
     on_approval_required: Callable[[str, str, dict[str, Any], str, str], Awaitable[None]],
     on_approval_resolved: Callable[[str, str], Awaitable[None]],
+    api_key: str | None = None,
 ) -> str:
     """
     Run the ReAct agent and stream events via callbacks.
@@ -504,9 +506,9 @@ async def run_agent(
     Returns:
         Complete assembled response string.
     """
-    llm = ChatGroq(
-        api_key=GROQ_API_KEY,
-        model=app_settings.active_model,
+    llm = build_llm(
+        model_id=app_settings.active_model,
+        api_key=api_key,
         temperature=0,
         streaming=True,
     )

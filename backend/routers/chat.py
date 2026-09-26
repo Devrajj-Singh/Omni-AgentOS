@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Header
 
 from agents.orchestrator import run_orchestrated
 from context.workspace_context import build_project_context
@@ -26,6 +26,7 @@ async def orchestrate_streaming(
     active_file_path: str | None,
     autonomous_mode: bool,
     recently_opened_files: list[str] | None = None,
+    api_key: str | None = None,
 ) -> None:
     """Run the LangGraph agent and stream all events over WebSocket."""
     message_id = str(uuid.uuid4())
@@ -175,6 +176,7 @@ async def orchestrate_streaming(
             on_approval_required=on_approval_required,
             on_approval_resolved=on_approval_resolved,
             on_handoff=on_handoff,
+            api_key=api_key,
         )
 
         assistant_message = Message(
@@ -218,7 +220,8 @@ async def orchestrate_streaming(
 @router.post("/api/v1/chat", response_model=ChatResponse, status_code=202)
 async def chat(
     request: ChatRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> ChatResponse:
     """
     Initiate a streaming chat turn.
@@ -229,6 +232,7 @@ async def chat(
     Args:
         request: ChatRequest containing session_id, message, and conversation_history
         background_tasks: FastAPI BackgroundTasks for async streaming
+        x_api_key: Optional BYO API key passed in request header
     
     Returns:
         ChatResponse with task_id and status="streaming"
@@ -253,6 +257,7 @@ async def chat(
         active_file_path=request.active_file_path,
         autonomous_mode=request.autonomous_mode,
         recently_opened_files=request.recently_opened_files,
+        api_key=x_api_key,
     )
     
     # Return 202 immediately

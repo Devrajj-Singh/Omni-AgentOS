@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -22,6 +23,11 @@ class SettingsResponse(BaseModel):
     memory_count: int
     max_file_size_kb: int
     excluded_dirs: list[str]
+    has_user_api_key: bool = False
+
+
+class ApiKeyUpdateRequest(BaseModel):
+    api_key: str
 
 
 class ModelUpdateResponse(BaseModel):
@@ -38,7 +44,25 @@ async def get_settings() -> SettingsResponse:
         memory_count=memory_store.count(),
         max_file_size_kb=app_settings.max_file_size_kb,
         excluded_dirs=app_settings.excluded_dirs,
+        has_user_api_key=bool(app_settings.user_api_key),
     )
+
+
+@router.post("/settings/api-key")
+async def update_api_key(request: ApiKeyUpdateRequest) -> dict[str, Any]:
+    """Set or update user BYO API key."""
+    cleaned = request.api_key.strip()
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="API key cannot be empty.")
+    app_settings.user_api_key = cleaned
+    return {"status": "ok", "has_user_api_key": True}
+
+
+@router.delete("/settings/api-key")
+async def clear_api_key() -> dict[str, Any]:
+    """Clear user BYO API key and revert to default server key."""
+    app_settings.user_api_key = None
+    return {"status": "ok", "has_user_api_key": False}
 
 
 @router.patch("/settings/model", response_model=ModelUpdateResponse)

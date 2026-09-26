@@ -83,6 +83,7 @@ async def reflect_on_response(
     original_request: str,
     draft_response: str,
     task_id: str,
+    api_key: str | None = None,
 ) -> tuple[bool, str]:
     """
     Run a reflection pass on a draft response.
@@ -103,7 +104,7 @@ async def reflect_on_response(
         return False, draft_response
 
     llm = ChatGroq(
-        api_key=_get_groq_key(),
+        api_key=_get_groq_key(api_key),
         model=app_settings.active_model,
         temperature=0,
         streaming=False,
@@ -142,7 +143,7 @@ async def reflect_on_response(
         return False, draft_response
 
 
-def _get_groq_key() -> str:
-    import os
+def _get_groq_key(api_key: str | None = None) -> str:
+    from dependencies.llm_factory import resolve_api_key
 
-    return os.getenv("GROQ_API_KEY", "")
+    return resolve_api_key(api_key)

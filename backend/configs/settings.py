@@ -36,6 +36,7 @@ AVAILABLE_MODELS = [
 @dataclass
 class AppSettings:
     active_model: str = "openai/gpt-oss-120b"
+    user_api_key: str | None = None
     max_file_size_kb: int = 500
     excluded_dirs: list[str] = field(
         default_factory=lambda: [

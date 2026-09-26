@@ -2,10 +2,11 @@
 
 import { useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Brain, Cpu, Info, Palette } from 'lucide-react'
+import { Brain, Cpu, Info, KeyRound, Palette } from 'lucide-react'
 import { getSettings, updateModel } from '@/services/api'
 import { useSettingsStore } from '@/store/settings-store'
 import { AboutSection } from '@/components/settings/about-section'
+import { ApiKeyInput } from '@/components/settings/api-key-input'
 import { MemorySettings } from '@/components/settings/memory-settings'
 import { ModelSelector } from '@/components/settings/model-selector'
 import { SettingsSection } from '@/components/settings/settings-section'
@@ -35,6 +36,7 @@ export default function SettingsPage(): JSX.Element {
           activeModel: data.activeModel,
           availableModels: data.availableModels,
           memoryCount: data.memoryCount,
+          hasUserApiKey: data.hasUserApiKey,
         })
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load settings')
@@ -86,6 +88,14 @@ export default function SettingsPage(): JSX.Element {
               icon={<Cpu className="h-4 w-4 text-accent" />}
             >
               <ModelSelector models={availableModels} activeModel={activeModel} onSelect={handleModelSelect} />
+            </SettingsSection>
+
+            <SettingsSection
+              title="BYO API Key"
+              description="Provide your own model API key to override server credentials"
+              icon={<KeyRound className="h-4 w-4 text-accent" />}
+            >
+              <ApiKeyInput />
             </SettingsSection>
 
             <SettingsSection

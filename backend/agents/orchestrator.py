@@ -18,6 +18,7 @@ from agents.reflection import (
     reflect_on_response,
 )
 from configs.settings import app_settings
+from dependencies.llm_factory import build_llm
 from observability.logger import log_event, timed_span
 from tools.websearch import TAVILY_API_KEY, TAVILY_AVAILABLE, web_search
 
@@ -128,10 +129,10 @@ def _is_multi_agent_task(message: str) -> bool:
     return has_signal_term and word_count >= 6
 
 
-def _get_llm() -> ChatGroq:
-    return ChatGroq(
-        api_key=GROQ_API_KEY,
-        model=app_settings.active_model,
+def _get_llm(api_key: str | None = None) -> Any:
+    return build_llm(
+        model_id=app_settings.active_model,
+        api_key=api_key,
         temperature=0,
         streaming=False,
     )
@@ -154,6 +155,7 @@ async def _reflect_and_amend(
     task_id: str,
     on_thinking: Callable[[str], Awaitable[None]],
     on_token: Callable[[str], Awaitable[None]],
+    api_key: str | None = None,
 ) -> str:
     """
     Run reflection on an already-streamed response. If reflection produces
@@ -169,6 +171,7 @@ async def _reflect_and_amend(
         original_request=original_request,
         draft_response=draft_response,
         task_id=task_id,
+        api_key=api_key,
     )
 
     if was_improved and final and final != draft_response:
@@ -219,6 +222,7 @@ async def run_orchestrated(
     on_approval_resolved: Callable[[str, str], Awaitable[None]],
     on_handoff: Callable[[str | None, str, str], Awaitable[None]],
     project_context: str = "",
+    api_key: str | None = None,
 ) -> str:
     """Route simple requests to Coder or complex requests through the graph."""
     token_char_count = 0
@@ -274,6 +278,7 @@ async def run_orchestrated(
             on_thinking=on_thinking,
             on_approval_required=on_approval_required,
             on_approval_resolved=on_approval_resolved,
+            api_key=api_key,
         )
         response = await _reflect_and_amend(
             original_request=message,
@@ -281,6 +286,7 @@ async def run_orchestrated(
             task_id=task_id,
             on_thinking=on_thinking,
             on_token=counting_on_token,
+            api_key=api_key,
         )
         return finish_response(response)
 
@@ -290,7 +296,7 @@ async def run_orchestrated(
         await emit_handoff(None, "planner", "Multi-step request detected - planning")
         await on_thinking("Planning the approach...")
         with timed_span("agent_run", task_id, "planner"):
-            response = await _get_llm().ainvoke(
+            response = await _get_llm(api_key).ainvoke(
                 [SystemMessage(content=PLANNER_PROMPT), HumanMessage(content=state["task"])]
             )
             plan_text = response.content if isinstance(response.content, str) else str(response.content)
@@ -347,6 +353,7 @@ async def run_orchestrated(
                 on_thinking=on_thinking,
                 on_approval_required=on_approval_required,
                 on_approval_resolved=on_approval_resolved,
+                api_key=api_key,
             )
         log_event("coder_complete", task_id, agent="coder", output_preview=coder_output[:200])
         return {"coder_output": coder_output}
@@ -357,7 +364,7 @@ async def run_orchestrated(
         coder_output = state.get("coder_output") or ""
         with timed_span("agent_run", task_id, "reviewer"):
             review_input = f"Original task: {state['task']}\n\nOutput produced:\n{coder_output}"
-            response = await _get_llm().ainvoke(
+            response = await _get_llm(api_key).ainvoke(
                 [SystemMessage(content=REVIEWER_PROMPT), HumanMessage(content=review_input)]
             )
             review_text = response.content if isinstance(response.content, str) else str(response.content)
