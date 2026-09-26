@@ -1,11 +1,21 @@
 import { create } from 'zustand'
 
+export interface Artifact {
+  title: string
+  content: string
+  language: string
+}
+
 interface UIState {
   sidebarOpen: boolean
   activityPanelOpen: boolean
   terminalPanelOpen: boolean
   terminalPanelHeight: number
   explorerPanelWidth: number
+  artifactsPanelOpen: boolean
+  artifactsPanelWidth: number
+  artifactsPanelFullScreen: boolean
+  activeArtifact: Artifact | null
   wsConnected: boolean
   autonomousMode: boolean
 }
@@ -19,6 +29,10 @@ interface UIActions {
   toggleTerminalPanel: () => void
   setTerminalPanelHeight: (height: number) => void
   setExplorerPanelWidth: (width: number) => void
+  setArtifactsPanelOpen: (open: boolean) => void
+  setArtifactsPanelWidth: (width: number) => void
+  setArtifactsPanelFullScreen: (fullscreen: boolean) => void
+  setActiveArtifact: (artifact: Artifact | null) => void
   setWsConnected: (connected: boolean) => void
   toggleAutonomousMode: () => void
   setAutonomousMode: (value: boolean) => void
@@ -33,6 +47,10 @@ export const useUIStore = create<UIStore>()((set) => ({
   terminalPanelOpen: false,
   terminalPanelHeight: 160,
   explorerPanelWidth: 260,
+  artifactsPanelOpen: false,
+  artifactsPanelWidth: 400,
+  artifactsPanelFullScreen: false,
+  activeArtifact: null,
   wsConnected: false,
   autonomousMode: false,
 
@@ -45,6 +63,10 @@ export const useUIStore = create<UIStore>()((set) => ({
   toggleTerminalPanel: () => set((state) => ({ terminalPanelOpen: !state.terminalPanelOpen })),
   setTerminalPanelHeight: (height) => set({ terminalPanelHeight: height }),
   setExplorerPanelWidth: (width) => set({ explorerPanelWidth: width }),
+  setArtifactsPanelOpen: (open) => set({ artifactsPanelOpen: open }),
+  setArtifactsPanelWidth: (width) => set({ artifactsPanelWidth: width }),
+  setArtifactsPanelFullScreen: (fullscreen) => set({ artifactsPanelFullScreen: fullscreen }),
+  setActiveArtifact: (artifact) => set({ activeArtifact: artifact, artifactsPanelOpen: !!artifact }),
   setWsConnected: (connected) => set({ wsConnected: connected }),
   toggleAutonomousMode: () => set((state) => ({ autonomousMode: !state.autonomousMode })),
   setAutonomousMode: (value) => set({ autonomousMode: value }),

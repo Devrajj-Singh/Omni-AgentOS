@@ -13,8 +13,15 @@ from models.message import Message
 from models.ws_event import WSEvent, WSEventType
 from observability.logger import log_event
 from websocket.manager import manager
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Store active tasks for cancellation
+active_tasks: dict[str, asyncio.Task] = {}
 
 
 async def orchestrate_streaming(
@@ -205,6 +212,9 @@ async def orchestrate_streaming(
             )
         )
 
+    except asyncio.CancelledError:
+        logger.info(f"Task {task_id} was cancelled by user.")
+        return
     except Exception as e:
         await manager.send_event(
             session_id,
@@ -247,8 +257,8 @@ async def chat(
     )
     
     # Add streaming orchestration as background task
-    background_tasks.add_task(
-        orchestrate_streaming,
+    task = asyncio.create_task(
+        orchestrate_streaming(
         session_id=request.session_id,
         task_id=task_id,
         user_message=user_message,
@@ -258,7 +268,19 @@ async def chat(
         autonomous_mode=request.autonomous_mode,
         recently_opened_files=request.recently_opened_files,
         api_key=x_api_key,
-    )
+    ))
+    
+    active_tasks[task_id] = task
+    task.add_done_callback(lambda t: active_tasks.pop(task_id, None))
     
     # Return 202 immediately
     return ChatResponse(task_id=task_id, status="streaming")
+
+@router.post("/api/v1/chat/cancel/{task_id}", status_code=200)
+async def cancel_chat(task_id: str):
+    """Cancel an ongoing chat generation task."""
+    task = active_tasks.get(task_id)
+    if task and not task.done():
+        task.cancel()
+        return {"status": "cancelled", "task_id": task_id}
+    return {"status": "not_found_or_completed", "task_id": task_id}

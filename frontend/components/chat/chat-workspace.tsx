@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FolderOpen } from 'lucide-react'
 import { agentStyle } from '@/lib/agent-styles'
-import { sendChatMessage } from '@/services/api'
+import { sendChatMessage, cancelChatTask } from '@/services/api'
 import { wsService } from '@/services/websocket'
 import { useActivityStore } from '@/store/activity-store'
 import { useApprovalStore } from '@/store/approval-store'
@@ -14,6 +14,7 @@ import type { WSEvent } from '@/types'
 import { ApprovalBubble } from './approval-bubble'
 import { ChatInput } from './chat-input'
 import { MessageList } from './message-list'
+import { ArtifactsPanel } from './artifacts-panel'
 
 interface TaskStartPayload {
   messageId: string
@@ -183,9 +184,15 @@ export function ChatWorkspace(): JSX.Element {
   const activeFilePath = useDeveloperStore((state) => state.activeFilePath)
   const openedFiles = useDeveloperStore((state) => state.openedFiles)
   const autonomousMode = useUIStore((state) => state.autonomousMode)
+  const artifactsPanelOpen = useUIStore((state) => state.artifactsPanelOpen)
+  const artifactsPanelWidth = useUIStore((state) => state.artifactsPanelWidth)
+  const artifactsPanelFullScreen = useUIStore((state) => state.artifactsPanelFullScreen)
   const approvals = useApprovalStore((state) => state.pendingApprovals)
   const assistantMessageIdRef = useRef<string | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
   const [draft, setDraft] = useState('')
+  const [isDragging, setIsDragging] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
   const recentlyOpenedFiles = useMemo(
     () => openedFiles.map((file) => file.path),
     [openedFiles]
@@ -202,6 +209,7 @@ export function ChatWorkspace(): JSX.Element {
     })
 
     const unsubToken = wsService.on('token', (event) => {
+      if (!useChatStore.getState().isStreaming || !assistantMessageIdRef.current) return
       const payload = getTokenPayload(event)
       if (!payload) return
 
@@ -209,6 +217,7 @@ export function ChatWorkspace(): JSX.Element {
     })
 
     const unsubComplete = wsService.on('task.complete', () => {
+      if (!useChatStore.getState().isStreaming && !assistantMessageIdRef.current) return
       assistantMessageIdRef.current = null
       useChatStore.getState().finalizeMessage()
       useChatStore.getState().setStreaming(false)
@@ -217,6 +226,7 @@ export function ChatWorkspace(): JSX.Element {
     })
 
     const unsubError = wsService.on('error', (event) => {
+      if (!useChatStore.getState().isStreaming && !assistantMessageIdRef.current) return
       const payload = getErrorPayload(event)
       const message = payload?.message ?? 'Unknown streaming error'
       useChatStore.getState().setError(assistantMessageIdRef.current ?? '', message)
@@ -227,8 +237,14 @@ export function ChatWorkspace(): JSX.Element {
     })
 
     const unsubToolCall = wsService.on('tool.call', (event) => {
+      if (!useChatStore.getState().isStreaming || !assistantMessageIdRef.current) return
       const payload = getToolCallPayload(event)
       if (!payload) return
+
+      const msgId = assistantMessageIdRef.current
+      if (msgId) {
+        useChatStore.getState().addToolCall(msgId, payload.tool, payload.args)
+      }
 
       addEvent({
         label: '[Tool]',
@@ -238,8 +254,14 @@ export function ChatWorkspace(): JSX.Element {
     })
 
     const unsubToolResult = wsService.on('tool.result', (event) => {
+      if (!useChatStore.getState().isStreaming || !assistantMessageIdRef.current) return
       const payload = getToolResultPayload(event)
       if (!payload) return
+
+      const msgId = assistantMessageIdRef.current
+      if (msgId) {
+        useChatStore.getState().updateToolResult(msgId, payload.tool, payload.result)
+      }
 
       if (payload.tool === 'write_file_tool' || payload.tool === 'run_command_tool') {
         const { pendingApprovals, completeApproval } = useApprovalStore.getState()
@@ -265,6 +287,7 @@ export function ChatWorkspace(): JSX.Element {
     })
 
     const unsubThinking = wsService.on('agent.thinking', (event) => {
+      if (!useChatStore.getState().isStreaming) return
       const payload = getThinkingPayload(event)
       if (!payload) return
 
@@ -276,6 +299,7 @@ export function ChatWorkspace(): JSX.Element {
     })
 
     const unsubAgentHandoff = wsService.on('agent.handoff', (event) => {
+      if (!useChatStore.getState().isStreaming) return
       const payload = getAgentHandoffPayload(event)
       if (!payload) return
 
@@ -285,6 +309,11 @@ export function ChatWorkspace(): JSX.Element {
         message: payload.reason,
         status: 'running',
       })
+
+      const msgId = assistantMessageIdRef.current
+      if (msgId) {
+        useChatStore.getState().setMessageAgentName(msgId, style.label)
+      }
     })
 
     const unsubApprovalRequired = wsService.on('approval.required', (event) => {
@@ -336,6 +365,27 @@ export function ChatWorkspace(): JSX.Element {
     }
   }, [addEvent])
 
+  const handleStopGenerating = useCallback(async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    
+    const taskId = useChatStore.getState().currentTaskId
+    assistantMessageIdRef.current = null
+    
+    useChatStore.getState().stopStreaming()
+    addEvent({ label: '[Chat]', message: 'Generation stopped by user.', status: 'error' })
+
+    if (taskId) {
+      try {
+        await cancelChatTask(taskId)
+      } catch (e) {
+        console.error('Failed to cancel chat task', e)
+      }
+    }
+  }, [addEvent])
+
   const handleSend = useCallback(
     async (content: string): Promise<void> => {
       const conversationHistory = useChatStore.getState().messages
@@ -345,6 +395,9 @@ export function ChatWorkspace(): JSX.Element {
       useChatStore.getState().setStreaming(true)
 
       try {
+        const controller = new AbortController()
+        abortControllerRef.current = controller
+
         const { task_id } = await sendChatMessage(
           sessionId,
           content,
@@ -352,51 +405,177 @@ export function ChatWorkspace(): JSX.Element {
           workspacePath,
           activeFilePath,
           autonomousMode,
-          recentlyOpenedFiles
+          recentlyOpenedFiles,
+          controller.signal
         )
         useChatStore.getState().setCurrentTaskId(task_id)
-      } catch (error) {
+      } catch (error: any) {
+        if (error.name === 'AbortError') {
+          console.log('Chat request aborted by user')
+          return
+        }
         const message = stringifyError(error)
         useChatStore.getState().setError('', message)
         useChatStore.getState().setStreaming(false)
         useChatStore.getState().setCurrentTaskId(null)
         addEvent({ label: '[Error]', message, status: 'error' })
+      } finally {
+        abortControllerRef.current = null
       }
     },
     [activeFilePath, addEvent, autonomousMode, recentlyOpenedFiles, sessionId, workspacePath]
   )
 
+  const handleRegenerate = useCallback(
+    (messageId: string) => {
+      const msgs = useChatStore.getState().messages
+      const index = msgs.findIndex((m) => m.id === messageId)
+      if (index === -1) return
+
+      let userMsgIndex = -1
+      for (let i = index; i >= 0; i--) {
+        if (msgs[i].role === 'user') {
+          userMsgIndex = i
+          break
+        }
+      }
+      if (userMsgIndex === -1) return
+
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+
+      const userMsg = msgs[userMsgIndex]
+      useChatStore.getState().truncateMessages(userMsg.id)
+      handleSend(userMsg.content)
+    },
+    [handleSend]
+  )
+
+  const handleEditSubmit = useCallback(
+    (messageId: string, newContent: string) => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+        abortControllerRef.current = null
+      }
+
+      useChatStore.getState().truncateMessages(messageId)
+      handleSend(newContent)
+    },
+    [handleSend]
+  )
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+
+    const startX = e.pageX
+    const startWidth = panelRef.current ? panelRef.current.offsetWidth : artifactsPanelWidth
+    let currentWidth = startWidth
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    let animationFrameId: number | null = null
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = startX - moveEvent.pageX
+      const minWidth = 320
+      const maxWidth = Math.floor(window.innerWidth * 0.85)
+      currentWidth = Math.max(minWidth, Math.min(startWidth + delta, maxWidth))
+
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId)
+      }
+
+      animationFrameId = requestAnimationFrame(() => {
+        if (panelRef.current) {
+          panelRef.current.style.width = `${currentWidth}px`
+        }
+      })
+    }
+
+    const onMouseUp = () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId)
+      }
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setIsDragging(false)
+      useUIStore.getState().setArtifactsPanelWidth(currentWidth)
+
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [artifactsPanelWidth])
+
   return (
-    <div className="flex h-full flex-col bg-transparent">
-      <MessageList messages={messages} onSuggestionClick={setDraft} />
-      <div>
-        {approvals.map((approval) => (
-          <ApprovalBubble key={approval.approvalId} approval={approval} />
-        ))}
-      </div>
-      <div className="px-4 pb-4 pt-2">
-        {workspacePath && (
-          <div className="mb-2 flex items-center gap-2 text-xs text-text-muted">
-            <FolderOpen className="h-3 w-3 shrink-0 text-accent" />
-            <span className="truncate">{workspacePath.split(/[/\\]/).pop()}</span>
-            {activeFilePath && (
-              <>
-                <span className="text-text-disabled">·</span>
-                <span className="truncate text-accent">
-                  {activeFilePath.split(/[/\\]/).pop()}
-                </span>
-              </>
-            )}
-          </div>
-        )}
-        <ChatInput
-          onSend={handleSend}
-          disabled={isStreaming}
-          value={draft}
-          onValueChange={setDraft}
-          contextLabel={activeFilePath ? activeFilePath.split(/[/\\]/).pop() : undefined}
+    <div className="flex h-full w-full bg-transparent overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <MessageList 
+          messages={messages} 
+          onSuggestionClick={setDraft}
+          onRegenerate={handleRegenerate}
+          onEditSubmit={handleEditSubmit}
         />
+        <div>
+          {approvals.map((approval) => (
+            <ApprovalBubble key={approval.approvalId} approval={approval} />
+          ))}
+        </div>
+        <div className="px-4 pb-4 pt-2 shrink-0">
+          {workspacePath && (
+            <div className="mb-2 flex items-center gap-2 text-xs text-text-muted">
+              <FolderOpen className="h-3 w-3 shrink-0 text-accent" />
+              <span className="truncate">{workspacePath.split(/[/\\]/).pop()}</span>
+              {activeFilePath && (
+                <>
+                  <span className="text-text-disabled">·</span>
+                  <span className="truncate text-accent">
+                    {activeFilePath.split(/[/\\]/).pop()}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+          <ChatInput
+            onSend={handleSend}
+            onStop={handleStopGenerating}
+            disabled={isStreaming}
+            value={draft}
+            onValueChange={setDraft}
+            contextLabel={activeFilePath ? activeFilePath.split(/[/\\]/).pop() : undefined}
+          />
+        </div>
       </div>
+      
+      {artifactsPanelOpen && (
+        <div 
+          ref={panelRef}
+          className={`shrink-0 border-l border-border-default flex relative ${
+            isDragging ? 'transition-none select-none' : 'transition-all duration-300 ease-in-out'
+          } ${artifactsPanelFullScreen ? 'fixed inset-0 z-50 bg-bg-base' : ''}`} 
+          style={{ width: artifactsPanelFullScreen ? '100%' : `${artifactsPanelWidth}px` }}
+        >
+          {!artifactsPanelFullScreen && (
+            <div
+              className="group absolute -left-1.5 top-0 bottom-0 z-30 flex w-3 cursor-col-resize items-center justify-center"
+              onMouseDown={handleMouseDown}
+            >
+              <div
+                className={`h-full w-1 transition-colors ${
+                  isDragging ? 'bg-accent' : 'bg-transparent group-hover:bg-accent/60'
+                }`}
+              />
+            </div>
+          )}
+          <ArtifactsPanel />
+        </div>
+      )}
     </div>
   )
 }
