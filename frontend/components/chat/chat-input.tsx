@@ -7,13 +7,14 @@ import { AutonomousToggle } from './autonomous-toggle'
 
 export interface ChatInputProps {
   onSend: (content: string) => void
+  onStop?: () => void
   disabled: boolean
   value: string
   onValueChange: (value: string) => void
   contextLabel?: string
 }
 
-export function ChatInput({ onSend, disabled, value, onValueChange, contextLabel }: ChatInputProps): JSX.Element {
+export function ChatInput({ onSend, onStop, disabled, value, onValueChange, contextLabel }: ChatInputProps): JSX.Element {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const previousDisabledRef = useRef(disabled)
   const dismissResolvedApprovals = useApprovalStore((state) => state.dismissResolvedApprovals)
@@ -68,23 +69,34 @@ export function ChatInput({ onSend, disabled, value, onValueChange, contextLabel
         <div className="flex flex-col gap-2 px-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-2 pr-3 text-xs text-text-muted">
             <AutonomousToggle />
-            {contextLabel ? (
-              <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border-default bg-bg-base px-2 py-1">
+            {contextLabel && (
+              <span className="inline-flex max-w-[160px] items-center gap-1 rounded-md border border-border-default bg-bg-base px-2 py-1">
                 <span className="truncate">{contextLabel}</span>
               </span>
-            ) : (
-              <span>{disabled ? 'Generating...' : 'Shift+Enter for newline'}</span>
             )}
+            <span className="text-text-disabled">{disabled ? 'Generating...' : 'Shift+Enter for newline'}</span>
           </div>
-          <button
-            type="submit"
-            disabled={disabled || !value.trim()}
-            className="btn-primary flex shrink-0 items-center justify-center gap-1.5 px-4 py-1.5 text-xs sm:justify-start"
-            aria-label="Send message"
-          >
-            {disabled ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-            <span>Send</span>
-          </button>
+          {disabled && onStop ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="btn-primary flex shrink-0 items-center justify-center gap-1.5 px-4 py-1.5 text-xs sm:justify-start bg-status-red hover:bg-status-red/90 text-white border-none"
+              aria-label="Stop generation"
+            >
+              <span className="h-3 w-3 bg-white block rounded-sm"></span>
+              <span>Stop</span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!value.trim()}
+              className="btn-primary flex shrink-0 items-center justify-center gap-1.5 px-4 py-1.5 text-xs sm:justify-start"
+              aria-label="Send message"
+            >
+              <Send className="h-3 w-3" />
+              <span>Send</span>
+            </button>
+          )}
         </div>
       </div>
     </form>

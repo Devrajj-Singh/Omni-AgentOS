@@ -31,7 +31,8 @@ export async function sendChatMessage(
   workspacePath?: string | null,
   activeFilePath?: string | null,
   autonomousMode?: boolean,
-  recentlyOpenedFiles?: string[]
+  recentlyOpenedFiles?: string[],
+  signal?: AbortSignal
 ): Promise<{ task_id: string; status: string }> {
   const res = await fetch(`${BASE_URL}/api/v1/chat`, {
     method: 'POST',
@@ -54,10 +55,19 @@ export async function sendChatMessage(
       autonomous_mode: autonomousMode ?? false,
       recently_opened_files: recentlyOpenedFiles ?? [],
     }),
+    signal,
   })
 
   if (!res.ok) throw new Error(`Chat request failed: ${res.status}`)
   return res.json() as Promise<{ task_id: string; status: string }>
+}
+
+export async function cancelChatTask(taskId: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/v1/chat/cancel/${taskId}`, {
+    method: 'POST',
+    headers: getApiKeyHeader(),
+  })
+  if (!res.ok) throw new Error(`Cancel request failed: ${res.status}`)
 }
 
 export async function resolveApproval(
