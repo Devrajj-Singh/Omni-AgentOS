@@ -14,6 +14,16 @@ import type {
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
 
+export function getApiKeyHeader(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const key = sessionStorage.getItem('omni_user_api_key')
+    return key ? { 'X-API-Key': key.trim() } : {}
+  } catch {
+    return {}
+  }
+}
+
 export async function sendChatMessage(
   sessionId: string,
   message: string,
@@ -25,7 +35,10 @@ export async function sendChatMessage(
 ): Promise<{ task_id: string; status: string }> {
   const res = await fetch(`${BASE_URL}/api/v1/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...getApiKeyHeader(),
+    },
     body: JSON.stringify({
       session_id: sessionId,
       message,
@@ -267,6 +280,7 @@ export async function getSettings(): Promise<AppSettings> {
     memory_count: number
     max_file_size_kb: number
     excluded_dirs: string[]
+    has_user_api_key?: boolean
   }
 
   return {
@@ -281,6 +295,29 @@ export async function getSettings(): Promise<AppSettings> {
     memoryCount: data.memory_count,
     maxFileSizeKb: data.max_file_size_kb,
     excludedDirs: data.excluded_dirs,
+    hasUserApiKey: data.has_user_api_key,
+  }
+}
+
+export async function updateApiKey(apiKey: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/v1/settings/api-key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey }),
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res, `Failed to update API key: ${res.status}`))
+  }
+}
+
+export async function clearApiKey(): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/v1/settings/api-key`, {
+    method: 'DELETE',
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res, `Failed to clear API key: ${res.status}`))
   }
 }
 
