@@ -31,6 +31,8 @@ Two principles drove the resequencing:
 | 12 | Reflection Agent | Done - tagged phase-12-complete |
 | 12.5 | Redis Migration | Done - tagged phase-12.5-complete |
 | 12.6 | BYO API Key and Multi-Provider LLM Factory | Done - tagged phase-12.6-complete |
+| 12.7 | Chat UI/UX Polish | Done - tagged phase-12.7-complete |
+| 13 | Autonomous Project Builder | Complete |
 
 ---
 

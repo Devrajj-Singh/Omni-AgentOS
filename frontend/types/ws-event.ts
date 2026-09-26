@@ -3,6 +3,8 @@ export type WSEventType =
   | 'agent.thinking'
   | 'agent.done'
   | 'agent.handoff'
+  | 'agent.task_graph_init'
+  | 'agent.task_graph_update'
   | 'tool.call'
   | 'tool.result'
   | 'approval.required'

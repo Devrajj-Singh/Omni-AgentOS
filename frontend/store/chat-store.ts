@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Message } from '@/types'
+import type { Message, TaskGraph, TaskGraphStepStatus } from '@/types'
 
 const SESSION_STORAGE_KEY = 'omni-session-id'
 
@@ -17,6 +17,7 @@ interface ChatState {
   messages: Message[]
   isStreaming: boolean
   currentTaskId: string | null
+  taskGraph: TaskGraph | null
 }
 
 interface ChatActions {
@@ -33,6 +34,9 @@ interface ChatActions {
   addToolCall: (messageId: string, tool: string, args: Record<string, unknown>) => void
   updateToolResult: (messageId: string, tool: string, result: string) => void
   truncateMessages: (messageId: string) => void
+  setTaskGraph: (taskGraph: TaskGraph | null) => void
+  updateTaskGraphStep: (stepId: string, status: TaskGraphStepStatus, agent?: string) => void
+  clearTaskGraph: () => void
 }
 
 type ChatStore = ChatState & ChatActions
@@ -42,6 +46,7 @@ export const useChatStore = create<ChatStore>()((set) => ({
   messages: [],
   isStreaming: false,
   currentTaskId: null,
+  taskGraph: null,
 
   addUserMessage: (content) => {
     const message: Message = {
@@ -141,7 +146,7 @@ export const useChatStore = create<ChatStore>()((set) => ({
 
   setCurrentTaskId: (taskId) => set({ currentTaskId: taskId }),
 
-  clearMessages: () => set({ messages: [], currentTaskId: null, isStreaming: false }),
+  clearMessages: () => set({ messages: [], currentTaskId: null, isStreaming: false, taskGraph: null }),
 
   setMessageAgentName: (id, agentName) =>
     set((state) => ({
@@ -188,6 +193,30 @@ export const useChatStore = create<ChatStore>()((set) => ({
       if (index === -1) return state
       return { messages: state.messages.slice(0, index) }
     }),
+
+  setTaskGraph: (taskGraph) => set({ taskGraph }),
+
+  updateTaskGraphStep: (stepId, status, agent) =>
+    set((state) => {
+      if (!state.taskGraph) return state
+      return {
+        taskGraph: {
+          ...state.taskGraph,
+          steps: state.taskGraph.steps.map((step) =>
+            step.id === stepId
+              ? {
+                  ...step,
+                  status,
+                  ...(agent ? { agent } : {}),
+                }
+              : step
+          ),
+        },
+      }
+    }),
+
+  clearTaskGraph: () => set({ taskGraph: null }),
 }))
 
 export default useChatStore
+

@@ -3,8 +3,10 @@
 import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { useActivityStore } from '@/store/activity-store'
+import { useChatStore } from '@/store/chat-store'
 import { useUIStore } from '@/store/ui-store'
 import { ActivityEventItem } from './activity-event-item'
+import { TaskGraphView } from '@/components/chat/task-graph-view'
 
 const activityVariants = {
   open: { width: 280, opacity: 1, transition: { duration: 0.2 } },
@@ -13,6 +15,7 @@ const activityVariants = {
 
 export function ActivityPanel(): JSX.Element {
   const events = useActivityStore((state) => state.events)
+  const taskGraph = useChatStore((state) => state.taskGraph)
   const { activityPanelOpen, wsConnected } = useUIStore()
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -35,7 +38,12 @@ export function ActivityPanel(): JSX.Element {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {events.length === 0 ? (
+        {taskGraph && (
+          <div className="p-2 border-b border-border-default/60 bg-bg-base/30">
+            <TaskGraphView taskGraph={taskGraph} compact />
+          </div>
+        )}
+        {events.length === 0 && !taskGraph ? (
           <div className="p-4 text-sm text-text-muted">No activity yet.</div>
         ) : (
           events.map((event) => <ActivityEventItem key={event.id} event={event} />)
