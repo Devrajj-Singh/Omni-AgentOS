@@ -1,4 +1,5 @@
 import { useUiStore } from '@/store/ui-store'
+import { useLogsStore } from '@/store/logs-store'
 import type { WSEvent, WSEventType } from '@/types'
 
 type WSEventHandler = (event: WSEvent) => void
@@ -94,6 +95,11 @@ class WebSocketService {
   }
 
   private dispatch(event: WSEvent): void {
+    try {
+      useLogsStore.getState().pushEvent(event)
+    } catch (error) {
+      console.error('Error logging ws event:', error)
+    }
     const handlers = this.listeners.get(event.type)
     handlers?.forEach((handler) => {
       try {

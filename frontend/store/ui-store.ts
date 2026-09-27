@@ -18,6 +18,7 @@ interface UIState {
   activeArtifact: Artifact | null
   wsConnected: boolean
   autonomousMode: boolean
+  isResizingTerminal: boolean
 }
 
 interface UIActions {
@@ -28,6 +29,7 @@ interface UIActions {
   setTerminalPanelOpen: (open: boolean) => void
   toggleTerminalPanel: () => void
   setTerminalPanelHeight: (height: number) => void
+  setIsResizingTerminal: (resizing: boolean) => void
   setExplorerPanelWidth: (width: number) => void
   setArtifactsPanelOpen: (open: boolean) => void
   setArtifactsPanelWidth: (width: number) => void
@@ -53,6 +55,7 @@ export const useUIStore = create<UIStore>()((set) => ({
   activeArtifact: null,
   wsConnected: false,
   autonomousMode: false,
+  isResizingTerminal: false,
 
   // Actions
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
@@ -62,6 +65,7 @@ export const useUIStore = create<UIStore>()((set) => ({
   setTerminalPanelOpen: (open) => set({ terminalPanelOpen: open }),
   toggleTerminalPanel: () => set((state) => ({ terminalPanelOpen: !state.terminalPanelOpen })),
   setTerminalPanelHeight: (height) => set({ terminalPanelHeight: height }),
+  setIsResizingTerminal: (resizing) => set({ isResizingTerminal: resizing }),
   setExplorerPanelWidth: (width) => set({ explorerPanelWidth: width }),
   setArtifactsPanelOpen: (open) => set({ artifactsPanelOpen: open }),
   setArtifactsPanelWidth: (width) => set({ artifactsPanelWidth: width }),

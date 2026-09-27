@@ -8,7 +8,7 @@ import { ActivityPanel } from '@/components/activity/activity-panel'
 import { TerminalPanel } from './terminal-panel'
 
 export function AppShell({ children }: { children: React.ReactNode }): JSX.Element {
-  const { activityPanelOpen, terminalPanelOpen, terminalPanelHeight, toggleActivityPanel } = useUIStore()
+  const { activityPanelOpen, terminalPanelOpen, terminalPanelHeight, isResizingTerminal, toggleActivityPanel } = useUIStore()
   const [isCompact, setIsCompact] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
 
@@ -25,7 +25,7 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
   }, [])
 
   const showActivityPanel = activityPanelOpen && !isCompact && !isMobile
-  const terminalRow = terminalPanelOpen ? `${terminalPanelHeight}px` : '40px'
+  const terminalRow = terminalPanelOpen ? `${terminalPanelHeight}px` : '36px'
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-bg-base">
@@ -47,20 +47,22 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
             ? 'minmax(0, 1fr)'
             : `auto minmax(0, 1fr) ${showActivityPanel ? '280px' : '0px'}`,
           gridTemplateRows: isMobile ? 'minmax(0, 1fr) 56px' : `minmax(0, 1fr) ${terminalRow}`,
-          transition: 'grid-template-columns 0.2s ease, grid-template-rows 0.2s ease',
+          transition: isResizingTerminal
+            ? 'none'
+            : 'grid-template-columns 0.2s ease, grid-template-rows 0.2s ease',
         }}
       >
         <div
-          className={isMobile ? '' : 'border-r border-border-default'}
+          className={isMobile ? '' : 'border-r border-border-default h-full'}
           style={{
             gridColumn: isMobile ? '1' : '1',
-            gridRow: isMobile ? '2' : '1',
+            gridRow: isMobile ? '2' : '1 / -1',
           }}
         >
           <Sidebar variant={isMobile ? 'bottom' : 'side'} />
         </div>
         <div
-          className="min-w-0 overflow-hidden"
+          className="min-w-0 min-h-0 overflow-hidden flex flex-col"
           style={{
             gridColumn: isMobile ? '1' : '2',
             gridRow: isMobile ? '1' : '1',
@@ -69,10 +71,10 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
           {children}
         </div>
         <div
-          className="overflow-hidden border-l border-border-default"
+          className="overflow-hidden border-l border-border-default h-full"
           style={{
             gridColumn: isMobile ? '1' : '3',
-            gridRow: '1',
+            gridRow: isMobile ? '1' : '1 / -1',
             width: showActivityPanel ? '280px' : '0px',
             opacity: showActivityPanel ? 1 : 0,
             transition: 'width 0.2s ease, opacity 0.15s ease',
@@ -82,9 +84,9 @@ export function AppShell({ children }: { children: React.ReactNode }): JSX.Eleme
         </div>
         {!isMobile && (
           <div
-            className="border-t border-border-default"
+            className="border-t border-border-default overflow-hidden min-h-0"
             style={{
-              gridColumn: '1 / -1',
+              gridColumn: '2',
               gridRow: '2',
             }}
           >

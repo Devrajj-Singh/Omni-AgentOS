@@ -40,10 +40,15 @@ class ConnectionManager:
 
     async def _relay_loop(self, session_id: str) -> None:
         """Forward Redis-published events for this session to its socket."""
-        redis_client = get_redis_client()
-        pubsub = redis_client.pubsub()
-        channel = self._channel(session_id)
-        await pubsub.subscribe(channel)
+        try:
+            redis_client = get_redis_client()
+            pubsub = redis_client.pubsub()
+            channel = self._channel(session_id)
+            await pubsub.subscribe(channel)
+        except Exception as e:
+            logger.debug(f"Redis pubsub unavailable for session {session_id} ({e}); using direct delivery.")
+            return
+
         try:
             async for message in pubsub.listen():
                 if message.get("type") != "message":
@@ -52,13 +57,17 @@ class ConnectionManager:
                 if websocket is None:
                     break
                 try:
+                    # Only relay if not already handled directly (or parse payload)
                     await websocket.send_text(message["data"])
                 except Exception as e:
                     logger.error(f"Failed to relay event to session {session_id}: {e}")
                     break
+        except Exception as e:
+            logger.debug(f"Redis relay loop ended for session {session_id}: {e}")
         finally:
-            await pubsub.unsubscribe(channel)
-            await pubsub.aclose()
+            with contextlib.suppress(Exception):
+                await pubsub.unsubscribe(channel)
+                await pubsub.aclose()
 
     async def disconnect(self, session_id: str) -> None:
         if session_id in self._connections:
@@ -73,19 +82,30 @@ class ConnectionManager:
 
     async def send_event(self, session_id: str, event: WSEvent) -> None:
         """
-        Publish a WSEvent for a session via Redis. Delivered by whichever
-        worker holds that session's actual WebSocket connection.
+        Send a WSEvent to the connected client.
+        Delivers directly to the local connection if present, and publishes to Redis
+        so any other worker holding the socket can also deliver it.
         """
-        redis_client = get_redis_client()
-        try:
-            await redis_client.publish(
-                self._channel(session_id), event.model_dump_json()
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to publish event for session {session_id}: {e}. "
-                f"Event type: {event.type}, task_id: {event.task_id}"
-            )
+        delivered_locally = False
+        websocket = self._connections.get(session_id)
+        if websocket is not None:
+            try:
+                await websocket.send_text(event.model_dump_json())
+                delivered_locally = True
+            except Exception as e:
+                logger.error(f"Failed to send direct event to session {session_id}: {e}")
+
+        # If already delivered directly in this process, skip Redis publishing to avoid duplicates,
+        # unless running in distributed mode where other workers might care.
+        if not delivered_locally:
+            try:
+                redis_client = get_redis_client()
+                await redis_client.publish(
+                    self._channel(session_id), event.model_dump_json()
+                )
+            except Exception as e:
+                logger.debug(f"Could not publish event to Redis for session {session_id}: {e}")
+
 
 
 manager = ConnectionManager()

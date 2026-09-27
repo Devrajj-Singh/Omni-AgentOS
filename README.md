@@ -142,29 +142,28 @@ docs/
 
 ### Completed
 
-- AI Chat
-- Streaming Responses
-- Developer Mode
-- Tool Calling
-- Memory System
-- Semantic Search
-- RAG
-- Research Mode
-- Settings Management
-
-### In Progress
-
-- Human-in-the-Loop Execution
-- Approval Workflow System
+- AI Chat & Streaming Responses
+- Developer Mode & Workspace Awareness
+- Tool Calling (LangGraph integration)
+- Memory System & Semantic Search
+- Research Mode & Document Ingestion
+- Settings & BYO API Key Multi-Provider LLM Factory
+- Human-in-the-Loop Execution & Approval Workflow System
+- Multi-Agent Orchestration & Reflection Agent
+- Lightweight Observability System
+- Repository Intelligence
+- Redis Migration for Pub/Sub & Shared State
+- Autonomous Project Builder with Task Graph
+- Logs / Traces / Terminal Bottom Panel (Phase 13.5)
 
 ### Planned
 
-- Multi-Agent Orchestration
-- ONNX-based Local Intent Classifier
-- ONNX Inference Runtime
-- Repository Intelligence
-- Knowledge Graph Memory
-- Docker Deployment
+- GitHub Integration (as MCP Client - Phase 13.6)
+- In-Editor Code Editing with Monaco (Phase 13.7)
+- MCP Tool Protocol Exposing Core Tools as Servers (Phase 14)
+- Local ML Layer (Phase 14.5)
+- PostgreSQL Migration (Phase 15)
+- Docker & Kubernetes Full Deployment (Phase 16)
 
 ---
 
