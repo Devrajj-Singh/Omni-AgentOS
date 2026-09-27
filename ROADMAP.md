@@ -33,6 +33,9 @@ Two principles drove the resequencing:
 | 12.6 | BYO API Key and Multi-Provider LLM Factory | Done - tagged phase-12.6-complete |
 | 12.7 | Chat UI/UX Polish | Done - tagged phase-12.7-complete |
 | 13 | Autonomous Project Builder | Complete |
+| 13.5 | Logs / Traces / Terminal Bottom Panel | Complete |
+| 13.6 | GitHub Integration (as MCP Client) | Planned |
+| 13.7 | In-Editor Code Editing (Monaco-based) | Planned |
 
 ---
 
@@ -62,21 +65,25 @@ Two principles drove the resequencing:
 
 ---
 
-## Phase 13.5 — GitHub Integration Panel
+## Phase 13.5 — Logs / Traces / Terminal Bottom Panel
 
-**Goal:** Eliminate the tab-switching friction of the developer GitHub workflow by bringing the critical actions (view PRs, create PR, publish release) directly into Omni AgentOS as a resizable side panel, powered by the GitHub REST API.
+**Goal:** Provide full real-time operational visibility and interactive terminal execution directly within the bottom panel.
 
-**Why:** The current workflow for every phase is: finish work -> switch to browser -> open GitHub -> type PR title/body -> switch back -> copy release notes -> switch again -> paste -> publish. That is 6-8 context switches for a mechanical task. A native panel collapses this to zero.
+- **Logs Tab:** Live auto-scrolling console subscribing to all WebSocket events with color-coded entry types (tokens, tool calls, tool results, handoffs, agent thinking, errors, approvals, task graph updates).
+- **Traces Tab:** Horizontal Gantt-style timeline for completed/active tasks, visualizing agent nodes and duration with color-coded spans.
+- **Terminal Tab:** Full interactive xterm.js terminal connected to an interactive backend PTY session (`pywinpty` on Windows, `pty` on Unix) sandboxed in the workspace directory.
 
-**What it is NOT:** An embedded browser or GitHub mirror. GitHub blocks iframe embedding (X-Frame-Options: DENY) — browser-within-browser is technically impossible on the web. This is a purpose-built native panel using the GitHub REST API exposing only the actions that matter during development.
+---
 
-- GitHub OAuth 2.0 flow — one-time Connect GitHub in Settings; token stored in sessionStorage (same pattern as Phase 12.6 API key)
-- Resizable panel (drag handle), opens via a persistent GitHub button in the sidebar alongside existing panels
-- **PR tab:** list open PRs, create new PR with branch selector, title, body pre-filled by AI from current branch diff + commit messages
-- **Releases tab:** list recent releases and tags, publish a new release with AI-generated title and body from PR description
-- **AI draft button:** one click -> agent reads the diff and commit log -> generates PR title, body, release notes in the exact repo style. User reviews and edits before submitting.
-- No GitHub features beyond these — frictionless workflow, not a GitHub replacement
-- **Portfolio narrative:** The agent does not just generate code — it handles the surrounding development workflow too. PR creation and release management happen inside the same tool, with the AI drafting the content based on what was actually changed.
+## Phase 13.6 — GitHub Integration (as MCP Client)
+
+**Goal:** Eliminate the tab-switching friction of the developer GitHub workflow by bringing critical actions and repository browsing directly into Omni AgentOS via GitHub's MCP server.
+
+---
+
+## Phase 13.7 — In-Editor Code Editing (Monaco-based)
+
+**Goal:** Direct in-editor code inspection, diff reviewing, and editing powered by Monaco Editor.
 
 ---
 

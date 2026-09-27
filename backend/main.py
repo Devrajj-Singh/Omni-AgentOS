@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dependencies.redis_client import close_redis_client
 from tools.websearch import TAVILY_AVAILABLE
 
-from routers import approval, chat, health, memory, observability, research, session, settings_router, websocket, workspace
+from routers import approval, chat, health, memory, observability, research, session, settings_router, terminal, websocket, workspace
 
 # Configure logging
 logging.basicConfig(
@@ -65,13 +65,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Configure CORS with environment-based origins
-    allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
-    allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",")]
+    # Configure CORS with environment-based origins + local dev regex
+    allowed_origins_str = os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001",
+    )
+    allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
     
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -86,6 +90,7 @@ def create_app() -> FastAPI:
     app.include_router(observability.router, prefix="/api/v1", tags=["observability"])
     app.include_router(research.router, prefix="/api/v1", tags=["research"])
     app.include_router(settings_router.router, prefix="/api/v1", tags=["settings"])
+    app.include_router(terminal.router, tags=["terminal"])
     app.include_router(websocket.router, tags=["websocket"])
     app.include_router(workspace.router, prefix="/api/v1", tags=["workspace"])
 
